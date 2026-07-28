@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.cache/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Excel lock files (created while a workbook is open)
+~$*.xlsx
+~$*.xls
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Sheet-memory local store (dev/test data, not source)
+src/sheet-classifier/data/
