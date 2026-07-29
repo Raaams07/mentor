@@ -17,9 +17,15 @@
  *
  * Finally, a cross-type collision investigation: two genuinely different
  * sheet types (a Vendor List and a Payroll List) for the SAME client,
- * constructed to be close in size/shape but not identical — does the fuzzy
- * match confuse them? This is a reporting exercise, not just pass/fail: see
- * the FINDING lines in the output and the summary printed at the end.
+ * constructed to be close in size/shape but not identical. This originally
+ * found a real gap — column-shape similarity alone couldn't tell a
+ * legitimate one-column-drift edit apart from a coincidental cross-type
+ * shape overlap (both landed at the same 83.3%). header_signature +
+ * headerSequenceSimilarity was added as a required second signal to fix
+ * it (see sheet-memory-store.js) — this section proves the fix: the
+ * close-variant collision now correctly returns needs_input, while the
+ * legitimate drift case still fuzzy-matches. See the FINDING line for the
+ * exact numbers.
  *
  * Run with: node src/sheet-classifier/sheet-memory-test.js
  * Uses an in-memory store (no file writes) so repeated runs stay deterministic.
@@ -31,7 +37,7 @@ const { extractSheetSignals, extractWorkbookSignals } = require("./signal-extrac
 const { classifySheet, classifyWorkbook } = require("./classifier.js");
 const { JsonFileSheetMemoryStore } = require("./sheet-memory-store.js");
 const { resolveSheetLabel, rememberSheetLabel } = require("./sheet-memory.js");
-const { computeStructuralSignature, tagSequenceSimilarity } = require("./structural-signature.js");
+const { computeStructuralSignature, tagSequenceSimilarity, headerSequenceSimilarity } = require("./structural-signature.js");
 
 const DEMO_FILE = path.join(__dirname, "..", "demo-data", "Three_Sisters_Kitchen_MENTOR_Demo.xlsx");
 
@@ -214,9 +220,12 @@ async function runCrossTypeCollisionInvestigation() {
   const clientId = "collision-test-client";
   const vendorSignals = extractSheetSignals("Approved Vendors", buildVendorListValues(16));
   const vendorClassification = classifySheet(vendorSignals);
+  const vendorSig = computeStructuralSignature(vendorSignals);
   assert(vendorClassification.type === "unknown", "Vendor List classifies as unknown (reaches the memory layer, as intended)");
 
   // --- Case 1: the "close" variant — differs in exactly one column's shape ---
+  // This is the exact case that used to collide (structural similarity 83.3%,
+  // above the 80% cutoff) before the header-text corroboration was added.
   {
     const store = new JsonFileSheetMemoryStore({ filePath: null });
     await rememberSheetLabel({ clientId, sheetName: "Approved Vendors", sheetSignals: vendorSignals, userProvidedLabel: "Approved supplier list", store });
@@ -225,22 +234,23 @@ async function runCrossTypeCollisionInvestigation() {
     const payrollClassification = classifySheet(payrollSignals);
     assert(payrollClassification.type === "unknown", "Payroll List (close variant) classifies as unknown (reaches the memory layer, as intended)");
 
-    // Compute the raw similarity directly, not just whatever resolveSheetLabel
-    // happens to surface — we want the actual number regardless of outcome.
-    const similarity = tagSequenceSimilarity(computeStructuralSignature(vendorSignals).tags, computeStructuralSignature(payrollSignals).tags);
+    const payrollSig = computeStructuralSignature(payrollSignals);
+    const structuralSimilarity = tagSequenceSimilarity(vendorSig.tags, payrollSig.tags);
+    const headerSimilarity = headerSequenceSimilarity(vendorSig.headerTokens, payrollSig.headerTokens);
     const result = await resolveSheetLabel({ clientId, sheetName: "Employee Payroll", sheetSignals: payrollSignals, classification: payrollClassification, store });
 
-    console.log(`  Close variant (1 column differs): status=${result.status}, similarity=${(similarity * 100).toFixed(1)}%`);
-    console.log(`  Cutoff is 80% — margin: ${((similarity - 0.8) * 100).toFixed(1)} points ${similarity >= 0.8 ? "OVER" : "under"} the threshold`);
+    console.log(`  Close variant (1 column differs): status=${result.status}`);
+    console.log(`    structural similarity=${(structuralSimilarity * 100).toFixed(1)}%  (cutoff 80%, ${((structuralSimilarity - 0.8) * 100).toFixed(1)} pts ${structuralSimilarity >= 0.8 ? "OVER" : "under"})`);
+    console.log(`    header similarity=${(headerSimilarity * 100).toFixed(1)}%  (cutoff 50%, ${((headerSimilarity - 0.5) * 100).toFixed(1)} pts ${headerSimilarity >= 0.5 ? "OVER" : "under"})`);
+
+    assert(result.status === "needs_input", "Payroll List (close variant) is correctly NOT fuzzy-matched to Vendor's label — header check blocks it despite structural similarity clearing 80%");
 
     if (result.status === "remembered") {
       reportFinding(
-        `Vendor List vs. Payroll List, differing in only 1 of 6 columns, scored ${(similarity * 100).toFixed(1)}% similarity — ` +
-          `at/above the 80% cutoff. Payroll List was fuzzy-matched to Vendor's remembered label ("${result.label}"), which is wrong — ` +
-          "these are genuinely different sheet types that happen to share a common ID/Name/Category/low-cardinality-numeric/status shape."
+        `Vendor List vs. Payroll List, differing in only 1 of 6 columns, scored ${(structuralSimilarity * 100).toFixed(1)}% structural similarity ` +
+          `and ${(headerSimilarity * 100).toFixed(1)}% header similarity — both cleared their cutoffs. Payroll List was fuzzy-matched to Vendor's remembered ` +
+          `label ("${result.label}"), which is wrong.`
       );
-    } else {
-      console.log("  No collision for this variant.");
     }
   }
 
@@ -251,45 +261,44 @@ async function runCrossTypeCollisionInvestigation() {
 
     const payrollSignals = extractSheetSignals("Employee Payroll", buildPayrollListValuesDistinctVariant(16));
     const payrollClassification = classifySheet(payrollSignals);
+    const payrollSig = computeStructuralSignature(payrollSignals);
 
-    const similarity = tagSequenceSimilarity(computeStructuralSignature(vendorSignals).tags, computeStructuralSignature(payrollSignals).tags);
+    const structuralSimilarity = tagSequenceSimilarity(vendorSig.tags, payrollSig.tags);
+    const headerSimilarity = headerSequenceSimilarity(vendorSig.headerTokens, payrollSig.headerTokens);
     const result = await resolveSheetLabel({ clientId, sheetName: "Employee Payroll", sheetSignals: payrollSignals, classification: payrollClassification, store });
 
-    console.log(`\n  Distinct variant (2 columns differ): status=${result.status}, similarity=${(similarity * 100).toFixed(1)}%`);
-    console.log(`  Cutoff is 80% — margin: ${((similarity - 0.8) * 100).toFixed(1)} points ${similarity >= 0.8 ? "OVER" : "under"} the threshold`);
+    console.log(`\n  Distinct variant (2 columns differ): status=${result.status}`);
+    console.log(`    structural similarity=${(structuralSimilarity * 100).toFixed(1)}%  (cutoff 80%, ${((structuralSimilarity - 0.8) * 100).toFixed(1)} pts ${structuralSimilarity >= 0.8 ? "OVER" : "under"})`);
+    console.log(`    header similarity=${(headerSimilarity * 100).toFixed(1)}%  (cutoff 50%, ${((headerSimilarity - 0.5) * 100).toFixed(1)} pts ${headerSimilarity >= 0.5 ? "OVER" : "under"})`);
     assert(result.status === "needs_input", "Payroll List (distinct variant, 2 columns differ) is correctly NOT fuzzy-matched to Vendor's label");
   }
 
-  // --- Case 3: characterize the crossover mathematically across column counts ---
-  // A single differing column among n total columns produces similarity = 1 - 1/n.
-  // This finds exactly where that crosses the 80% cutoff.
-  console.log("\n  Single-column-difference similarity by sheet size (same fuzzy-match function, synthetic tag sequences):");
-  const crossoverRows = [];
-  for (const n of [3, 4, 5, 6, 7, 8, 10, 12]) {
-    const a = Array.from({ length: n }, (_, i) => "TAG" + i);
-    const b = a.slice();
-    b[0] = "DIFFERENT";
-    const sim = tagSequenceSimilarity(a, b);
-    crossoverRows.push({ n, sim });
-    console.log(`    n=${String(n).padStart(2)} columns: ${(sim * 100).toFixed(1)}%  ${sim >= 0.8 ? "(>= 80% cutoff — WOULD fuzzy-match)" : ""}`);
-  }
-  const crossoverPoint = crossoverRows.find((r) => r.sim >= 0.8);
-  reportFinding(
-    `Because similarity = 1 - editDistance/columnCount, a SINGLE differing column already reaches or exceeds the 80% cutoff for any ` +
-      `sheet with ${crossoverPoint.n}+ columns (exact crossover: ${crossoverPoint.n} columns = ${(crossoverPoint.sim * 100).toFixed(1)}%). Every sheet in our own ` +
-      "demo dataset (Bank Statement: 8 cols, Payroll Summary: 8 cols, Supplier Invoices: 11 cols) is well past that crossover — " +
-      "meaning at realistic sheet sizes, ANY two sheets differing by only one column's shape will be treated as the same signature."
-  );
+  // --- Case 3: the legitimate drift case, re-verified against the REAL fixture
+  // used elsewhere in this suite (added one column, nothing else changed) ---
+  // Confirms the header check doesn't collateral-damage the case it has to keep working.
+  {
+    const store = new JsonFileSheetMemoryStore({ filePath: null });
+    const v1Signals = extractSheetSignals("Inventory Snapshot", buildInventoryValues(20));
+    await rememberSheetLabel({ clientId, sheetName: "Inventory Snapshot", sheetSignals: v1Signals, userProvidedLabel: "Weekly inventory count", store });
 
-  // --- Case 4: the sharpest evidence — legitimate drift and illegitimate collision produce the SAME number ---
-  const driftSimilarity = tagSequenceSimilarity(
-    ["TEXT_UNIQUE", "TEXT_UNIQUE", "TEXT_CATEGORICAL", "NUM_LOW", "NUM_LOW"],
-    ["TEXT_UNIQUE", "TEXT_UNIQUE", "TEXT_CATEGORICAL", "NUM_LOW", "NUM_LOW", "TEXT_MODERATE"]
-  );
+    const v3Signals = extractSheetSignals("Stock Levels (New)", buildInventoryValues(28, { includeSupplierColumn: true }));
+    const v1Sig = computeStructuralSignature(v1Signals);
+    const v3Sig = computeStructuralSignature(v3Signals);
+    const structuralSimilarity = tagSequenceSimilarity(v1Sig.tags, v3Sig.tags);
+    const headerSimilarity = headerSequenceSimilarity(v1Sig.headerTokens, v3Sig.headerTokens);
+    const result = await resolveSheetLabel({ clientId, sheetName: "Stock Levels (New)", sheetSignals: v3Signals, classification: classifySheet(v3Signals), store });
+
+    console.log(`\n  Legitimate drift (1 column added, same sheet): status=${result.status}`);
+    console.log(`    structural similarity=${(structuralSimilarity * 100).toFixed(1)}%   header similarity=${(headerSimilarity * 100).toFixed(1)}%`);
+    assert(result.status === "remembered" && result.matchedVia === "fuzzy", "legitimate one-column-added drift still fuzzy-matches correctly with the header gate in place");
+  }
+
   reportFinding(
-    `The legitimate "client added one column" drift case (Step 2's own regression fixture) scores ${(driftSimilarity * 100).toFixed(1)}% similarity — ` +
-      "statistically indistinguishable from the illegitimate Vendor-vs-Payroll collision above. No single similarity threshold can separate " +
-      "'same sheet, minor edit' from 'different sheet, coincidental overlap' using column-shape tags alone — they can and do produce identical scores."
+    "Structural-tag similarity alone is unchanged and still can't tell these two cases apart on its own (both land at 83.3%) — " +
+      "that math didn't change. What changed is that a fuzzy match now ALSO requires header-text similarity to clear 50%: the " +
+      "legitimate drift case (headers unchanged except one insertion) scores ~83% there too, while the Vendor/Payroll collision " +
+      "scores ~25% — different wording throughout, despite the coincidentally-matching shape. The two-signal AND-gate separates " +
+      "them cleanly where either signal alone could not."
   );
 
   console.log("");
@@ -301,7 +310,7 @@ async function run() {
   await runCrossTypeCollisionInvestigation();
 
   if (findings.length > 0) {
-    console.log(`\n${findings.length} finding(s) from the cross-type collision investigation (see FINDING lines above) — design gap, not a broken test.`);
+    console.log(`\n${findings.length} note(s) from the cross-type collision investigation (see FINDING lines above).`);
   }
 
   if (failures > 0) {

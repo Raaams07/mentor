@@ -42,24 +42,44 @@ function tagColumn(col) {
   return "TEXT_OTHER";
 }
 
+// Header text is normalized (lowercased, punctuation stripped) purely for
+// COMPARISON purposes below — it's never used as a match key on its own,
+// only as a secondary corroborating signal alongside the structural tags.
+function normalizeHeaderText(header) {
+  return String(header === undefined || header === null ? "" : header)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function computeStructuralSignature(sheetSignals) {
   const columns = (sheetSignals && sheetSignals.columns) || [];
   const tags = columns.map(tagColumn);
+  const headerTokens = columns.map((c) => normalizeHeaderText(c && c.header));
 
   return {
     signature: `${tags.length}:${tags.join(",")}`,
     tags,
     columnCount: tags.length,
+    headerTokens,
+    // Placeholder for blank headers so position information survives the
+    // join/split round-trip through storage — an empty string would collapse
+    // against the delimiter.
+    headerSignature: headerTokens.map((h) => h || "∅").join("|"),
   };
 }
 
-// Token-level Levenshtein distance — identical technique to the character-level
-// Levenshtein this codebase already uses for fuzzy vendor-name matching
-// (see levenshteinDistance in "Mentor workbook index/mentor-workbook-index.js"),
-// just operating on an array of shape tags instead of an array of characters.
-function tokenLevenshteinDistance(tokensA, tokensB) {
-  const m = tokensA.length;
-  const n = tokensB.length;
+// Generic weighted edit distance: like classic Levenshtein, but the
+// substitution cost between two items is whatever costFn returns (0 = same,
+// 1 = completely different) instead of a hard equal/not-equal check. Both
+// tag-sequence comparison (binary cost) and header-text comparison (fuzzy
+// string-similarity cost) below are built on this one function — same
+// technique this codebase already uses for fuzzy vendor-name matching (see
+// levenshteinDistance in "Mentor workbook index/mentor-workbook-index.js"),
+// generalized so a "substitution" can be partial instead of all-or-nothing.
+function weightedEditDistance(itemsA, itemsB, costFn) {
+  const m = itemsA.length;
+  const n = itemsB.length;
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
 
   for (let i = 0; i <= m; i++) dp[i][0] = i;
@@ -67,15 +87,19 @@ function tokenLevenshteinDistance(tokensA, tokensB) {
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      const cost = tokensA[i - 1] === tokensB[j - 1] ? 0 : 1;
+      const cost = costFn(itemsA[i - 1], itemsB[j - 1]);
       dp[i][j] = Math.min(
         dp[i - 1][j] + 1, // deletion
         dp[i][j - 1] + 1, // insertion
-        dp[i - 1][j - 1] + cost // substitution
+        dp[i - 1][j - 1] + cost // substitution (partial cost allowed)
       );
     }
   }
   return dp[m][n];
+}
+
+function tokenLevenshteinDistance(tokensA, tokensB) {
+  return weightedEditDistance(tokensA, tokensB, (a, b) => (a === b ? 0 : 1));
 }
 
 // 1.0 = identical tag sequence, 0.0 = nothing alike. Used for the fuzzy
@@ -89,6 +113,36 @@ function tagSequenceSimilarity(tagsA, tagsB) {
   return 1 - distance / maxLen;
 }
 
+// Character-level fuzzy similarity between two individual header strings
+// (already normalized). Reuses weightedEditDistance directly — JS strings
+// index like arrays, so no separate character-array conversion is needed.
+function singleHeaderSimilarity(a, b) {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  return 1 - weightedEditDistance(a, b, (x, y) => (x === y ? 0 : 1)) / maxLen;
+}
+
+// Sequence-level header similarity: aligns two sheets' header lists (via the
+// same insert/delete/substitute edit-distance machinery used for tags, so a
+// column insertion doesn't misalign everything after it), but each
+// substitution's cost is graded by how similar the two header strings
+// actually are, not just whether they're byte-identical. 1.0 = same wording
+// throughout, 0.0 = nothing in common.
+function headerSequenceSimilarity(headerTokensA, headerTokensB) {
+  const maxLen = Math.max(headerTokensA.length, headerTokensB.length);
+  if (maxLen === 0) return 1;
+  const distance = weightedEditDistance(headerTokensA, headerTokensB, (a, b) => 1 - singleHeaderSimilarity(a, b));
+  return 1 - distance / maxLen;
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { computeStructuralSignature, tagColumn, tagSequenceSimilarity, tokenLevenshteinDistance };
+  module.exports = {
+    computeStructuralSignature,
+    tagColumn,
+    tagSequenceSimilarity,
+    tokenLevenshteinDistance,
+    normalizeHeaderText,
+    headerSequenceSimilarity,
+  };
 }

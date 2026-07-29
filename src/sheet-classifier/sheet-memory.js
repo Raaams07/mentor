@@ -29,7 +29,7 @@ async function resolveSheetLabel({ clientId, sheetName, sheetSignals, classifica
     };
   }
 
-  const { signature } = computeStructuralSignature(sheetSignals);
+  const { signature, headerSignature } = computeStructuralSignature(sheetSignals);
 
   const exact = await store.findExact(clientId, signature);
   if (exact) {
@@ -42,7 +42,7 @@ async function resolveSheetLabel({ clientId, sheetName, sheetSignals, classifica
     };
   }
 
-  const fuzzy = await store.findSimilar(clientId, signature);
+  const fuzzy = await store.findSimilar(clientId, signature, headerSignature);
   if (fuzzy) {
     return {
       status: "remembered",
@@ -51,6 +51,7 @@ async function resolveSheetLabel({ clientId, sheetName, sheetSignals, classifica
       structuralSignature: signature,
       matchedVia: "fuzzy",
       similarity: fuzzy.similarity,
+      headerSimilarity: fuzzy.headerSimilarity,
     };
   }
 
@@ -69,8 +70,8 @@ async function rememberSheetLabel({ clientId, sheetName, sheetSignals, userProvi
   if (!clientId) throw new Error("rememberSheetLabel requires a clientId — sheet memory is scoped per client");
   if (!userProvidedLabel || !userProvidedLabel.trim()) throw new Error("rememberSheetLabel requires a non-empty userProvidedLabel");
 
-  const { signature } = computeStructuralSignature(sheetSignals);
-  return store.remember(clientId, signature, sheetName, userProvidedLabel.trim());
+  const { signature, headerSignature } = computeStructuralSignature(sheetSignals);
+  return store.remember(clientId, { structuralSignature: signature, headerSignature, sheetName, userProvidedLabel: userProvidedLabel.trim() });
 }
 
 if (typeof module !== "undefined" && module.exports) {
