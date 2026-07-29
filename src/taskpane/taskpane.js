@@ -1,5 +1,6 @@
 /* global Excel, Office */
 
+const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
 
 /* ============================================================
    MENTOR — Background Workbook Index
@@ -438,6 +439,7 @@
       loadSheetNames();
       startMentorObserver();
       mentorInit();
+      mentorSheetMemoryInit(mentorLogAction);
     });
   };
   
