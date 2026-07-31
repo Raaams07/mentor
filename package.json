@@ -24,6 +24,7 @@
     "stop": "office-addin-debugging stop manifest.xml",
     "test:classifier": "node src/sheet-classifier/regression-test.js",
     "test:sheet-memory": "node src/sheet-classifier/sheet-memory-test.js",
+    "test:gst-reconciliation": "node src/gst-reconciliation/gst-reconciliation-test.js",
     "validate": "office-addin-manifest validate manifest.xml",
     "watch": "webpack --mode development --watch"
   },

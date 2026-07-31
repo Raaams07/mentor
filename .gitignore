@@ -25,3 +25,7 @@ Thumbs.db
 
 # Sheet-memory local store (dev/test data, not source)
 src/sheet-classifier/data/
+
+# Real company GST data used for local validation only — never committed
+src/demo-data/GST_2A_Books_Demo.xlsx
+src/gst-reconciliation/ground-truth/
