@@ -91,6 +91,18 @@ function runRoleRecognitionTests() {
   console.log("  Unrelated sheet ->", unrelatedResult.role, `(reason: ${unrelatedResult.reason})`);
   assert(unrelatedResult.role === "unknown", "a non-GST sheet is NOT force-fit into either role");
 
+  // Regression: real Tally-style purchase registers commonly have BOTH
+  // "Voucher Type" (a category — Purchase/Payment/Journal) and "Voucher
+  // No." as separate columns, with Type appearing first. A loose
+  // "contains voucher" rule matches Type before ever reaching No.
+  const booksWithVoucherTypeValues = [
+    ["Date", "Particulars", "Voucher Type", "Voucher No.", "GSTIN/UIN", "TV", "IGST", "CGST", "SGST"],
+    ["2026-05-01", "Vendor Alpha Pvt Ltd", "Purchase", "PV-101", GSTIN_ALPHA, 10000, 0, 900, 900],
+  ];
+  const booksWithVoucherTypeSignals = extractSheetSignals("Books", booksWithVoucherTypeValues);
+  const booksWithVoucherTypeResult = recognizeGstRole(booksWithVoucherTypeSignals, booksWithVoucherTypeValues, booksWithVoucherTypeSignals.headerRowIndex);
+  assert(booksWithVoucherTypeResult.columns.voucherNumber === 3, "with BOTH 'Voucher Type' (col 2) and 'Voucher No.' (col 3) present, voucherNumber resolves to the actual number column, not the type column");
+
   console.log("");
 }
 

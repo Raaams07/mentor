@@ -25,6 +25,11 @@
     "test:classifier": "node src/sheet-classifier/regression-test.js",
     "test:sheet-memory": "node src/sheet-classifier/sheet-memory-test.js",
     "test:gst-reconciliation": "node src/gst-reconciliation/gst-reconciliation-test.js",
+    "test:gst-wrong-head": "node src/gst-reconciliation/wrong-head-detector-test.js",
+    "test:gst-rcm": "node src/gst-reconciliation/rcm-detector-test.js",
+    "test:gst-ineligible-itc": "node src/gst-reconciliation/ineligible-itc-detector-test.js",
+    "test:gst-duplicates": "node src/gst-reconciliation/duplicate-invoice-detector-test.js",
+    "test:gst-description-field": "node src/gst-reconciliation/description-field-test.js",
     "validate": "office-addin-manifest validate manifest.xml",
     "watch": "webpack --mode development --watch"
   },

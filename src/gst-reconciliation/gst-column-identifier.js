@@ -63,12 +63,21 @@ const HEADER_RULES = {
     return mentionsStateOrUt && mentionsTaxOrGst;
   },
   invoiceNumber: (h) => containsPhrase(h, "invoice") && (containsWord(h, "no") || containsWord(h, "number") || containsWord(h, "num")),
-  voucherNumber: (h) => containsPhrase(h, "voucher"),
+  // Requires a number/no suffix for the same reason invoiceNumber does —
+  // real Tally-style purchase registers commonly have BOTH "Voucher Type"
+  // (a category like "Purchase"/"Payment"/"Journal", appearing first) and
+  // "Voucher No." as separate columns. A bare "contains voucher" check
+  // matches "Voucher Type" first and never reaches the real number column.
+  voucherNumber: (h) => containsPhrase(h, "voucher") && (containsWord(h, "no") || containsWord(h, "number") || containsWord(h, "num")),
   particulars: (h) => containsWord(h, "particulars") || containsWord(h, "narration"),
   tradeLegalName: (h) => containsPhrase(h, "trade") || containsPhrase(h, "legal name") || containsPhrase(h, "supplier name") || containsPhrase(h, "vendor name"),
   placeOfSupply: (h) => containsPhrase(h, "place of supply"),
   invoiceType: (h) => containsPhrase(h, "invoice type"),
   filingPeriod: (h) => containsPhrase(h, "filing period") || containsPhrase(h, "return period") || containsPhrase(h, "gstr 1") || containsPhrase(h, "gstr 2a"),
+  // GSTR-2A's own "Supply Attract Reverse Charge" (Y/N) column — the
+  // government-return-only field rcm-detector.js trusts as its primary
+  // signal, per Section 9(3)/9(4) CGST Act and Section 5(3) IGST Act.
+  reverseCharge: (h) => containsPhrase(h, "reverse charge") || containsWord(h, "rcm"),
 };
 
 // Most non-blank cells in the column need to look like GSTINs, not all —
@@ -111,6 +120,7 @@ function identifyGstColumns(sheetSignals, values, headerRowIndex) {
     placeOfSupply: null,
     invoiceType: null,
     filingPeriod: null,
+    reverseCharge: null,
     dateColumns: [],
   };
 
@@ -140,6 +150,7 @@ function identifyGstColumns(sheetSignals, values, headerRowIndex) {
     if (result.placeOfSupply === null && HEADER_RULES.placeOfSupply(header)) result.placeOfSupply = c;
     if (result.invoiceType === null && HEADER_RULES.invoiceType(header)) result.invoiceType = c;
     if (result.filingPeriod === null && HEADER_RULES.filingPeriod(header)) result.filingPeriod = c;
+    if (result.reverseCharge === null && HEADER_RULES.reverseCharge(header)) result.reverseCharge = c;
 
     if (isDateColumn(col)) result.dateColumns.push(c);
   }
