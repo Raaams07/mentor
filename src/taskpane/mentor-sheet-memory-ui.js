@@ -12,7 +12,7 @@
  * back to an inline "what is this sheet?" prompt.
  *
  * Scope note: this scans every sheet except MENTOR's own generated ones
- * (currently just "MENTOR Audit Log"). There's no reliable structural
+ * ("MENTOR Audit Log", "MENTOR Sheet Memory"). There's no reliable structural
  * signal yet to distinguish "a genuinely novel raw-data sheet" from "a
  * report/output sheet someone built" (e.g. this demo workbook's Variance
  * Analysis) — both come back "unknown" from the classifier. In practice
@@ -25,20 +25,30 @@
  * edit, since a sheet's fundamental shape doesn't usually change cell by
  * cell and re-scanning every column of every sheet on a 700ms debounce
  * would be wasteful.
+ *
+ * Storage: a WorkbookSheetMemoryStore (a dedicated "MENTOR Sheet Memory"
+ * sheet inside the workbook) is authoritative, with a BrowserSheetMemoryStore
+ * (localStorage) as a fallback only — localStorage turned out not to
+ * reliably survive task pane close/reopen in this WebView2 hosting context
+ * (Office appears to route task panes across multiple separate storage
+ * profiles), so it can no longer be trusted as the primary source of truth.
  */
 
 const { extractSheetSignals } = require("../sheet-classifier/signal-extractor.js");
 const { classifySheet } = require("../sheet-classifier/classifier.js");
 const { resolveSheetLabel, rememberSheetLabel } = require("../sheet-classifier/sheet-memory.js");
 const { BrowserSheetMemoryStore } = require("../sheet-classifier/browser-sheet-memory-store.js");
+const { FallbackSheetMemoryStore } = require("../sheet-classifier/fallback-sheet-memory-store.js");
+const { WorkbookSheetMemoryStore, SHEET_NAME: MENTOR_SHEET_MEMORY_SHEET_NAME } = require("./mentor-workbook-sheet-memory-store.js");
 
-const mentorSheetMemoryStore = new BrowserSheetMemoryStore();
-let mentorSheetMemoryLogAction = null; // injected by mentorSheetMemoryInit — logs to MENTOR's existing audit history
+const mentorSheetMemoryStore = new FallbackSheetMemoryStore(new WorkbookSheetMemoryStore(), new BrowserSheetMemoryStore());
+let mentorSheetMemoryLogAction = null; // injected — updates the in-memory history counter/toggle text only
+let mentorSheetMemoryAppendAuditLogRow = null; // injected — the actual durable write to the "MENTOR Audit Log" sheet
 let mentorSheetMemoryQueue = [];
 let mentorPendingSheetMemoryPrompt = null;
 const mentorDismissedSheetMemoryThisSession = new Set();
 
-const MENTOR_OWNED_SHEET_NAMES = new Set(["MENTOR Audit Log"]);
+const MENTOR_OWNED_SHEET_NAMES = new Set(["MENTOR Audit Log", MENTOR_SHEET_MEMORY_SHEET_NAME]);
 
 // Placeholder client identifier, scoped to this workbook file — a real
 // account/client system will replace this. Until then, one workbook file
@@ -51,11 +61,16 @@ function mentorEscapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// logAction: the same mentorLogAction(description) already used elsewhere
-// in taskpane.js for the audit-history feed — passed in explicitly rather
-// than read off `window`, so this file has one clear, explicit dependency.
-async function mentorSheetMemoryInit(logAction) {
+// logAction: mentorLogAction(description) — updates the in-memory counter/
+// toggle text only, does NOT write to the Audit Log sheet by itself.
+// appendAuditLogRow: mentorAppendAuditLogRow(context, sheetName, cellRef,
+// description) — the actual durable Excel write. Every other flow in
+// taskpane.js calls both together; this file does the same below. Both are
+// passed in explicitly rather than read off `window`, so this file's
+// dependencies on taskpane.js are explicit, not implicit global lookups.
+async function mentorSheetMemoryInit(logAction, appendAuditLogRow) {
   mentorSheetMemoryLogAction = logAction;
+  mentorSheetMemoryAppendAuditLogRow = appendAuditLogRow;
 
   try {
     await Excel.run(async (context) => {
@@ -84,19 +99,34 @@ async function mentorScanForUnknownSheets() {
         if (MENTOR_OWNED_SHEET_NAMES.has(sheet.name)) continue;
         if (mentorDismissedSheetMemoryThisSession.has(sheet.name)) continue;
 
-        const usedRange = sheet.getUsedRangeOrNullObject();
-        usedRange.load("values, numberFormat, isNullObject");
-        await context.sync();
-        if (usedRange.isNullObject) continue;
+        // One sheet failing (a store error, a malformed range, anything)
+        // must not silently abort the scan for every OTHER sheet — that's
+        // exactly how a real bug here previously produced zero prompts
+        // workbook-wide with no visible error. Every sheet gets its own
+        // try/catch and a loud console.error if something goes wrong.
+        try {
+          const usedRange = sheet.getUsedRangeOrNullObject();
+          usedRange.load("values, numberFormat, isNullObject");
+          await context.sync();
+          if (usedRange.isNullObject) {
+            console.log("MENTOR sheet-memory: '" + sheet.name + "' has no used range — skipping");
+            continue;
+          }
 
-        const sheetSignals = extractSheetSignals(sheet.name, usedRange.values, { numberFormats: usedRange.numberFormat });
-        const classification = classifySheet(sheetSignals);
-        const result = await resolveSheetLabel({ clientId, sheetName: sheet.name, sheetSignals, classification, store: mentorSheetMemoryStore });
+          const sheetSignals = extractSheetSignals(sheet.name, usedRange.values, { numberFormats: usedRange.numberFormat });
+          const classification = classifySheet(sheetSignals);
+          const result = await resolveSheetLabel({ clientId, sheetName: sheet.name, sheetSignals, classification, store: mentorSheetMemoryStore });
+          console.log("MENTOR sheet-memory: '" + sheet.name + "' -> " + result.status + (result.status === "remembered" ? " (\"" + result.label + "\", via " + result.matchedVia + ")" : result.status === "classified" ? " (" + result.type + ")" : ""));
 
-        if (result.status === "needs_input") {
-          candidates.push({ ...result, clientId, sheetSignals });
+          if (result.status === "needs_input") {
+            candidates.push({ ...result, clientId, sheetSignals });
+          }
+        } catch (sheetError) {
+          console.error("MENTOR sheet-memory: failed to check sheet '" + sheet.name + "' — skipping it this scan", sheetError);
         }
       }
+
+      console.log("MENTOR sheet-memory: scan complete, " + candidates.length + " sheet(s) need input:", candidates.map((c) => c.sheetName));
 
       mentorSheetMemoryQueue = candidates;
       mentorShowNextSheetMemoryPrompt();
@@ -149,9 +179,28 @@ window.mentorSubmitSheetMemoryAnswer = async function () {
 
   const { clientId, sheetName, sheetSignals } = mentorPendingSheetMemoryPrompt;
   try {
-    await rememberSheetLabel({ clientId, sheetName, sheetSignals, userProvidedLabel: value, store: mentorSheetMemoryStore });
-    if (mentorSheetMemoryLogAction) {
-      mentorSheetMemoryLogAction("Learned that '" + sheetName + "' is \"" + value + "\" — won't ask again for a sheet with this shape");
+    console.log("MENTOR sheet-memory: submitting answer", { clientId, sheetName, value });
+    const rememberResult = await rememberSheetLabel({ clientId, sheetName, sheetSignals, userProvidedLabel: value, store: mentorSheetMemoryStore });
+    console.log("MENTOR sheet-memory: rememberSheetLabel returned", rememberResult);
+
+    const description = "Learned that '" + sheetName + "' is \"" + value + "\" — won't ask again for a sheet with this shape";
+    if (mentorSheetMemoryAppendAuditLogRow) {
+      try {
+        console.log("MENTOR sheet-memory: writing Audit Log row for", sheetName);
+        await Excel.run(async (context) => {
+          await mentorSheetMemoryAppendAuditLogRow(context, sheetName, "(whole sheet)", description);
+        });
+        console.log("MENTOR sheet-memory: Audit Log row write completed for", sheetName);
+        if (mentorSheetMemoryLogAction) mentorSheetMemoryLogAction(description);
+      } catch (writeError) {
+        console.error("MENTOR sheet-memory: failed to write Audit Log row", writeError);
+        if (mentorSheetMemoryLogAction) {
+          mentorSheetMemoryLogAction("Learned that '" + sheetName + "' is \"" + value + "\", but writing it to the Audit Log sheet failed: " + writeError.message);
+        }
+      }
+    } else {
+      console.error("MENTOR sheet-memory: mentorSheetMemoryAppendAuditLogRow was never injected — mentorSheetMemoryInit may not have run correctly");
+      if (mentorSheetMemoryLogAction) mentorSheetMemoryLogAction(description); // no audit-log writer wired in — still track it in-memory
     }
   } catch (error) {
     console.error("MENTOR sheet-memory: failed to save answer", error);
@@ -167,5 +216,5 @@ window.mentorSkipSheetMemoryPrompt = function () {
 };
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { mentorSheetMemoryInit, mentorScanForUnknownSheets };
+  module.exports = { mentorSheetMemoryInit, mentorScanForUnknownSheets, MENTOR_OWNED_SHEET_NAMES };
 }

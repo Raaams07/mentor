@@ -33,6 +33,8 @@ class BaseSheetMemoryStore {
   }
 
   // Subclasses override these two; everything else builds on `this.records`.
+  // _persist() may be sync (fs/localStorage) or async (an Office.js Excel
+  // write) — remember() always awaits it either way.
   _load() {
     return [];
   }
@@ -87,7 +89,7 @@ class BaseSheetMemoryStore {
       existing.header_signature = headerSignature;
       existing.user_provided_label = userProvidedLabel;
       existing.sheet_name_at_creation = sheetName;
-      this._persist();
+      await this._persist();
       return existing;
     }
 
@@ -100,7 +102,7 @@ class BaseSheetMemoryStore {
       created_at: new Date().toISOString(),
     };
     this.records.push(record);
-    this._persist();
+    await this._persist();
     return record;
   }
 
