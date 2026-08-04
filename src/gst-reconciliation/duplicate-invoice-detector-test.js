@@ -41,7 +41,7 @@ function runTests() {
     [GSTIN_A, "2026-05-01", "INV-200", 5000],
     [GSTIN_A, "2026-05-04", "INV-201", 5000],
   ]);
-  assert(sameAmountDifferentNumber.clusters.length === 1, "same GSTIN, same amount, different invoice numbers, close dates -> one cluster");
+  assert(sameAmountDifferentNumber.clusters.length === 1, "same GSTIN, same amount, different invoice numbers, 3 days apart -> one cluster");
   assert(sameAmountDifferentNumber.clusters[0].matchReason === "same_amount", "...matched on amount only");
 
   const threeEntriesOneCluster = run([
@@ -52,19 +52,59 @@ function runTests() {
   assert(threeEntriesOneCluster.clusters.length === 1, "the same invoice entered three times forms ONE cluster, not three overlapping pairs");
   assert(threeEntriesOneCluster.clusters[0].members.length === 3, "...containing all three entries");
 
+  const monthlyReentryPattern = run([
+    [GSTIN_A, "2026-05-01", "INV-999", 45000],
+    [GSTIN_A, "2026-05-31", "INV-999", 45000], // 30 days apart — a bookkeeping-close-cycle re-entry, the real pattern this rule was widened for
+  ]);
+  assert(monthlyReentryPattern.clusters.length === 1, "same invoice number, 30 days apart (a monthly re-entry pattern, validated against real data) -> flagged under the widened 45-day identifier window");
+
   console.log("\n-- Should NOT be flagged --\n");
 
   const sameInvoiceNumberFarApart = run([
     [GSTIN_A, "2026-01-01", "INV-400", 10000],
     [GSTIN_A, "2026-08-01", "INV-400", 10000],
   ]);
-  assert(sameInvoiceNumberFarApart.clusters.length === 0, "same invoice number, same amount, but ~7 months apart -> NOT flagged (outside the proximity window — likely a distinct re-supply, not a duplicate entry)");
+  assert(sameInvoiceNumberFarApart.clusters.length === 0, "same invoice number, same amount, but ~7 months (212 days) apart -> NOT flagged — well outside even the widened 45-day identifier window (likely a distinct re-supply or an invoice-numbering reset, not a duplicate entry)");
 
   const recurringMonthlyCharge = run([
     [GSTIN_A, "2026-05-01", "RENT-MAY", 20000],
     [GSTIN_A, "2026-06-01", "RENT-JUN", 20000],
   ]);
-  assert(recurringMonthlyCharge.clusters.length === 0, "two consecutive months' rent — same amount, ~31 days apart, different invoice numbers — is NOT flagged as a duplicate with the default 15-day window");
+  assert(recurringMonthlyCharge.clusters.length === 0, "two consecutive months' rent — same amount, ~31 days apart, DIFFERENT invoice numbers — is NOT flagged: amount-only matching uses a tight 3-day window, not the wider identifier window");
+
+  console.log("\n-- Regression: the specific over-flagging bug this file was fixed for --\n");
+
+  const manySameAmountAcrossTheYear = run([
+    [GSTIN_A, "2026-01-15", "BF-001", 500],
+    [GSTIN_A, "2026-02-15", "BF-002", 500],
+    [GSTIN_A, "2026-03-15", "BF-003", 500],
+    [GSTIN_A, "2026-04-15", "BF-004", 500],
+    [GSTIN_A, "2026-05-15", "BF-005", 500],
+    [GSTIN_A, "2026-06-15", "BF-006", 500],
+    [GSTIN_A, "2026-07-15", "BF-007", 500],
+    [GSTIN_A, "2026-08-15", "BF-008", 500],
+    [GSTIN_A, "2026-09-15", "BF-009", 500],
+  ]);
+  assert(
+    manySameAmountAcrossTheYear.clusters.length === 0,
+    "a vendor with a legitimately-recurring identical amount (e.g. a standard ₹500 monthly bank/service fee), each occurrence ~30 days from its neighbor and different invoice numbers -> NOT flagged, even though the whole SET shares one amount"
+  );
+
+  const chainedButShouldNotMergeIntoOneWideCluster = run([
+    [GSTIN_A, "2026-01-01", "C-001", 339],
+    [GSTIN_A, "2026-01-03", "C-002", 339], // 2 days from the previous -- within the tight amount-only window
+    [GSTIN_A, "2026-01-05", "C-003", 339], // 2 days from the previous
+    [GSTIN_A, "2026-01-07", "C-004", 339], // 2 days from the previous -- but 6 days from the FIRST entry
+    [GSTIN_A, "2026-01-09", "C-005", 339], // 2 days from the previous -- but 8 days from the first entry
+  ]);
+  const totalMembersClustered = chainedButShouldNotMergeIntoOneWideCluster.clusters.reduce((sum, c) => sum + c.members.length, 0);
+  const maxClusterSpread = chainedButShouldNotMergeIntoOneWideCluster.clusters.reduce((max, c) => Math.max(max, c.dateSpreadDays), 0);
+  assert(
+    !chainedButShouldNotMergeIntoOneWideCluster.clusters.some((c) => c.members.length === 5),
+    "five same-amount entries, each 2 days from its immediate neighbor but spanning 8 days total, do NOT get merged into one 5-member cluster via chaining"
+  );
+  assert(maxClusterSpread <= 3, "no resulting cluster's own date spread exceeds the 3-day amount-only window, even though the whole chain spans 8 days");
+  console.log("  (this scenario produced " + chainedButShouldNotMergeIntoOneWideCluster.clusters.length + " cluster(s) covering " + totalMembersClustered + " of 5 entries, each individually within the tight window — not one 8-day-wide cluster)");
 
   const differentGstins = run([
     [GSTIN_A, "2026-05-01", "INV-500", 7000],
@@ -80,14 +120,23 @@ function runTests() {
 
   console.log("\n-- Configurability --\n");
 
-  const widerWindowCatchesIt = run(
+  const widerIdentifierWindowCatchesIt = run(
     [
       [GSTIN_A, "2026-01-01", "INV-700", 10000],
-      [GSTIN_A, "2026-01-25", "INV-700", 10000],
+      [GSTIN_A, "2026-03-01", "INV-700", 10000], // 59 days apart -- exceeds even the widened 45-day default
     ],
-    { windowDays: 30 }
+    { identifierWindowDays: 60 }
   );
-  assert(widerWindowCatchesIt.clusters.length === 1, "a caller-supplied wider window (30 days) catches a pair the tighter default (15 days) would have missed at 24 days apart");
+  assert(widerIdentifierWindowCatchesIt.clusters.length === 1, "a caller-supplied wider identifier window (60 days) catches a pair the 45-day default would have missed at 59 days apart");
+
+  const tighterAmountOnlyWindowMissesIt = run(
+    [
+      [GSTIN_A, "2026-05-01", "INV-800", 9000],
+      [GSTIN_A, "2026-05-03", "INV-801", 9000], // 2 days apart -- caught by the 3-day default, but not by a 1-day override
+    ],
+    { amountOnlyWindowDays: 1 }
+  );
+  assert(tighterAmountOnlyWindowMissesIt.clusters.length === 0, "a caller-supplied tighter amount-only window (1 day) correctly misses a pair 2 days apart that the 3-day default would catch");
 
   console.log("\n-- Sheets without the needed columns --\n");
 

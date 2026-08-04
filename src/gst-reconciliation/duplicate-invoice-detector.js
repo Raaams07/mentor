@@ -3,16 +3,38 @@
  * ---------------------------------
  * Flags likely duplicate invoice entries: rows sharing the same GSTIN,
  * where EITHER the invoice/voucher number matches OR the amount matches
- * (within a small tolerance), AND the two dates fall within a configurable
- * proximity window.
+ * (within a small tolerance), AND the two dates fall within a proximity
+ * window — but the two match types use DIFFERENT windows and different
+ * chaining rules, because they're very different strengths of evidence:
  *
- * The date-proximity requirement is deliberate: a duplicate is normally a
- * DATA ENTRY error, which happens close in time (the same invoice keyed
- * in twice within days or weeks) — whereas a different, genuinely separate
- * invoice from the same vendor for a coincidentally identical amount many
- * months apart is far more likely to be a real, distinct transaction, not
- * a duplicate. Requiring proximity is what keeps this from over-flagging
- * routine recurring charges (e.g. an identical monthly rent amount).
+ *   - Same invoice/voucher NUMBER is strong, specific evidence on its
+ *     own. Validated against a real expert-completed reconciliation, the
+ *     genuine same-supplier duplicates in that file recurred roughly a
+ *     MONTH apart (a bookkeeping-close-cycle re-entry pattern: the same
+ *     invoice keyed in again during the following month's close), not
+ *     "within days" as this module originally assumed. The identifier
+ *     window is widened accordingly (45 days) — still bounded, to guard
+ *     against a legitimate invoice-numbering reset recurring across a
+ *     much longer span (e.g. a new financial year), but wide enough to
+ *     actually catch the real-world pattern this rule exists to find.
+ *
+ *   - Same AMOUNT alone is much weaker evidence — round and common
+ *     amounts (bank fees, standard charges) recur naturally and
+ *     non-suspiciously across a ledger. This path uses a much tighter
+ *     window (3 days) AND a clique constraint: accepting a new amount-
+ *     only match is rejected if it would push the WHOLE resulting
+ *     cluster's date span past that same tight window, not just the one
+ *     new pair. A plain pairwise check alone isn't enough here — chained
+ *     matches (A close to B, B close to C, C close to D...) can silently
+ *     merge records spanning months even though no single pair does, and
+ *     that's exactly the false-positive pattern this rule was built to
+ *     avoid. Confirmed against real data: a vendor with a naturally
+ *     recurring ₹339 charge was previously being reported as ONE 13-row
+ *     cluster spanning 49 days, entirely via amount-only chaining.
+ *
+ * Clusters (not just pairs): if the same invoice was entered three or
+ * more times, all of them are grouped into one cluster rather than
+ * reported as several overlapping pairs.
  *
  * Works on either a GSTR-2A-style sheet or a purchase-register-style
  * sheet — whichever identifier column is available (Invoice Number or
@@ -20,20 +42,10 @@
  * only within one at a time (the same invoice entered twice IN Books, or
  * the same invoice appearing twice in 2A due to a supplier filing error,
  * are both within-sheet phenomena).
- *
- * Clusters (not just pairs): if the same invoice was entered three or more
- * times, all of them are grouped into one cluster rather than reported as
- * several overlapping pairs.
- *
- * Default window is intentionally tight (15 days), not weeks — a genuine
- * data-entry duplicate is almost always keyed in within days of the
- * original, while a wide window (e.g. 60 days) would false-positive on
- * ordinary recurring charges of an identical amount (two consecutive
- * months' rent, ~30 days apart, from the same GSTIN). Callers who want a
- * wider window for a specific use case can pass options.windowDays.
  */
 
-const DEFAULT_WINDOW_DAYS = 15;
+const DEFAULT_IDENTIFIER_WINDOW_DAYS = 45; // same invoice/voucher number — wide enough for a monthly re-entry pattern, still bounded
+const DEFAULT_AMOUNT_ONLY_WINDOW_DAYS = 3; // same amount, no shared identifier — deliberately tight; also caps a merged cluster's TOTAL span, not just each pair
 const DEFAULT_AMOUNT_TOLERANCE = 1; // ₹1
 
 function toNumber(value) {
@@ -84,7 +96,8 @@ function determineReason(members, amountTolerance) {
 // columns: identifyGstColumns() result for this sheet.
 function findDuplicateInvoices(values, headerRowIndex, columns, options) {
   const opts = options || {};
-  const windowDays = opts.windowDays !== undefined ? opts.windowDays : DEFAULT_WINDOW_DAYS;
+  const identifierWindowDays = opts.identifierWindowDays !== undefined ? opts.identifierWindowDays : DEFAULT_IDENTIFIER_WINDOW_DAYS;
+  const amountOnlyWindowDays = opts.amountOnlyWindowDays !== undefined ? opts.amountOnlyWindowDays : DEFAULT_AMOUNT_ONLY_WINDOW_DAYS;
   const amountTolerance = opts.amountTolerance !== undefined ? opts.amountTolerance : DEFAULT_AMOUNT_TOLERANCE;
 
   if (columns.gstin === null) {
@@ -137,18 +150,52 @@ function findDuplicateInvoices(values, headerRowIndex, columns, options) {
       const ra = find(a);
       const rb = find(b);
       if (ra !== rb) parent[ra] = rb;
+      return find(a);
     };
+
+    // Tracks each cluster's [min, max] date (epoch ms) by current root —
+    // kept up to date on EVERY union (identifier or amount) so a lookup
+    // is never stale after the canonical root shifts, but only the
+    // amount-only path actually REJECTS a union based on it.
+    const clusterSpanByRoot = new Map();
+    const currentSpan = (root, fallbackRecord) => clusterSpanByRoot.get(root) || { min: fallbackRecord.date.getTime(), max: fallbackRecord.date.getTime() };
 
     for (let a = 0; a < group.length; a++) {
       for (let b = a + 1; b < group.length; b++) {
         const r1 = group[a];
         const r2 = group[b];
         if (!r1.date || !r2.date) continue; // can't judge proximity without both dates
-        if (daysBetween(r1.date, r2.date) > windowDays) continue;
 
         const sameIdentifier = r1.identifier && r2.identifier && r1.identifier === r2.identifier;
         const sameAmount = r1.amount !== null && r2.amount !== null && Math.abs(r1.amount - r2.amount) <= amountTolerance;
-        if (sameIdentifier || sameAmount) union(a, b);
+        if (!sameIdentifier && !sameAmount) continue;
+
+        const pairDays = daysBetween(r1.date, r2.date);
+
+        if (sameIdentifier) {
+          if (pairDays > identifierWindowDays) continue;
+          if (find(a) === find(b)) continue;
+          const spanA = currentSpan(find(a), r1);
+          const spanB = currentSpan(find(b), r2);
+          const merged = { min: Math.min(spanA.min, spanB.min), max: Math.max(spanA.max, spanB.max) };
+          const newRoot = union(a, b);
+          clusterSpanByRoot.set(newRoot, merged);
+          continue;
+        }
+
+        // Amount-only match — see the module docstring for why this path
+        // is deliberately much stricter than the identifier path.
+        if (pairDays > amountOnlyWindowDays) continue;
+        if (find(a) === find(b)) continue;
+
+        const spanA = currentSpan(find(a), r1);
+        const spanB = currentSpan(find(b), r2);
+        const merged = { min: Math.min(spanA.min, spanB.min), max: Math.max(spanA.max, spanB.max) };
+        const mergedSpanDays = (merged.max - merged.min) / 86400000;
+        if (mergedSpanDays > amountOnlyWindowDays) continue; // accepting this pair would blow the WHOLE resulting cluster's span past the tight window — reject the bridge, not just re-check this one pair
+
+        const newRoot = union(a, b);
+        clusterSpanByRoot.set(newRoot, merged);
       }
     }
 
@@ -175,5 +222,5 @@ function findDuplicateInvoices(values, headerRowIndex, columns, options) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { findDuplicateInvoices, parseDateValue, DEFAULT_WINDOW_DAYS, DEFAULT_AMOUNT_TOLERANCE };
+  module.exports = { findDuplicateInvoices, parseDateValue, DEFAULT_IDENTIFIER_WINDOW_DAYS, DEFAULT_AMOUNT_ONLY_WINDOW_DAYS, DEFAULT_AMOUNT_TOLERANCE };
 }
