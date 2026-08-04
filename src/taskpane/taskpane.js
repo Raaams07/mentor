@@ -1,6 +1,7 @@
 /* global Excel, Office */
 
-const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
+const { mentorSheetMemoryInit, MENTOR_OWNED_SHEET_NAMES } = require("./mentor-sheet-memory-ui.js");
+const { mentorGstReconciliationInit } = require("./mentor-gst-reconciliation-ui.js");
 
 /* ============================================================
    MENTOR — Background Workbook Index
@@ -439,7 +440,9 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
       loadSheetNames();
       startMentorObserver();
       mentorInit();
-      mentorSheetMemoryInit(mentorLogAction);
+      mentorSheetMemoryInit(mentorLogAction, mentorAppendAuditLogRow);
+      mentorGstReconciliationInit(mentorLogAction, mentorAppendAuditLogRow);
+      mentorRefreshActionCount(); // reflect whatever's already on the Audit Log sheet, not just "0" until the next event
     });
   };
   
@@ -1174,22 +1177,41 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
   
   async function onSheetChanged(changedAddress) {
     if (changedAddress) mentorLastChangedAddress = changedAddress; // remember for re-checks after dismiss/accept
+
+    // Any workbook change can affect the Audit Log sheet's row count —
+    // including a native Excel Undo, which MENTOR never gets a callback
+    // for specifically. Re-checking here (not just from mentorLogAction)
+    // is what actually catches that case.
+    mentorRefreshActionCount();
+
     try {
       await Excel.run(async (context) => {
         const sheet = context.workbook.worksheets.getActiveWorksheet();
+        sheet.load("name");
         const usedRange = sheet.getUsedRangeOrNullObject();
         usedRange.load("values, rowCount, columnCount, isNullObject");
         await context.sync();
-  
+
+        // MENTOR's own bookkeeping sheets (Audit Log, Sheet Memory) aren't
+        // client data or a report the user is building — the general
+        // suggestion engine (totals/variance/layout heuristics) has no
+        // business evaluating them. Same exclusion list the sheet-memory
+        // scanner already uses, so there's one shared source of truth for
+        // "which sheets are MENTOR's own."
+        if (MENTOR_OWNED_SHEET_NAMES.has(sheet.name)) {
+          hideMentorBadge();
+          return;
+        }
+
         if (changedAddress) {
           const rowMatch = changedAddress.match(/(\d+)$/);
           if (rowMatch) {
             await mentorAutoFillVarianceForRow(context, sheet, parseInt(rowMatch[1], 10) - 1);
           }
         }
-  
-        const stage = detectReportStage(usedRange, changedAddress);
-  
+
+        const stage = detectReportStage(usedRange, changedAddress, sheet.name);
+
         if (stage && !mentorDismissedThisSession.has(stage.id)) {
           showMentorBadge(stage);
         } else if (!stage) {
@@ -1201,14 +1223,15 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
     }
   }
   
-  function detectReportStage(usedRange, changedAddress) {
-  
+  function detectReportStage(usedRange, changedAddress, sheetName) {
+
     if (usedRange.isNullObject || usedRange.rowCount <= 1) {
       return {
-        id: "SETUP_LAYOUT",
-        title: "Start a report layout?",
-        message: "This sheet looks empty. Want me to set up a standard monthly report layout — title, period, and section headers?",
-        action: "insertLayout"
+        id: "SETUP_LAYOUT::" + sheetName,
+        title: "Start a report layout on '" + sheetName + "'?",
+        message: "'" + sheetName + "' looks empty. Want me to set up a standard monthly report layout — title, period, and section headers?",
+        action: "insertLayout",
+        sheetName: sheetName
       };
     }
   
@@ -1252,20 +1275,22 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
     // Stage: headers + at least one real data row, but no totals row yet
     if (hasDataRows && !hasTotalsRow) {
       return {
-        id: "ADD_TOTALS",
-        title: "Add totals?",
-        message: "I see figures without a totals row. Want me to add SUM totals at the bottom of each numeric column?",
-        action: "insertTotals"
+        id: "ADD_TOTALS::" + sheetName,
+        title: "Add totals to '" + sheetName + "'?",
+        message: "I see figures without a totals row on '" + sheetName + "'. Want me to add a SUM totals row (with number formatting) at the bottom of each numeric column, just on this sheet?",
+        action: "insertTotals",
+        sheetName: sheetName
       };
     }
-  
+
     // Stage: totals exist, no variance/comparison column in headers
     if (hasTotalsRow && !hasVarianceCol) {
       return {
-        id: "ADD_VARIANCE",
-        title: "Add a variance column?",
-        message: "Totals look good. Want me to add a variance column comparing this to last period or budget?",
-        action: "insertVariance"
+        id: "ADD_VARIANCE::" + sheetName,
+        title: "Add a variance column to '" + sheetName + "'?",
+        message: "Totals on '" + sheetName + "' look good. Want me to add a variance column comparing this to last period or budget, just on this sheet?",
+        action: "insertVariance",
+        sheetName: sheetName
       };
     }
   
@@ -1328,12 +1353,14 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
     try {
       await Excel.run(async (context) => {
         const sheet = context.workbook.worksheets.getActiveWorksheet();
+        sheet.load("name");
         const usedRange = sheet.getUsedRangeOrNullObject();
         usedRange.load("values, rowCount, columnCount, isNullObject");
         await context.sync();
         if (usedRange.isNullObject) { hideMentorBadge(); return; }
-  
-        const stage = detectReportStage(usedRange, address);
+        if (MENTOR_OWNED_SHEET_NAMES.has(sheet.name)) { hideMentorBadge(); return; }
+
+        const stage = detectReportStage(usedRange, address, sheet.name);
         if (stage && !mentorDismissedThisSession.has(stage.id)) {
           showMentorBadge(stage);
           return;
@@ -1359,28 +1386,51 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
     mentorRecheckAfterAction(mentorLastChangedAddress);
   };
   
-  const mentorActionHistory = [];
-  
-  function mentorLogAction(description) {
-    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    mentorActionHistory.push(time + " — " + description);
-    renderMentorHistory();
-  }
-  
-  function renderMentorHistory() {
+  // FIX: this used to track its own in-memory count (pushed to on every
+  // mentorLogAction call), which drifted from reality the moment anything
+  // changed the Audit Log sheet without going through mentorLogAction —
+  // most concretely, a native Excel Undo that removes rows (or the whole
+  // sheet) left the counter showing a stale number forever, since nothing
+  // ever told it to re-check. Now there is no separate count to drift:
+  // every call re-reads the sheet's actual current row count fresh, so it
+  // can't disagree with what Undo (or any other change) actually leaves
+  // in the workbook.
+  async function mentorRefreshActionCount() {
     const toggle = document.getElementById("mentor-history-toggle");
     const list = document.getElementById("mentor-history-list");
     if (!toggle) return;
-  
-    // Simplified per your point — the Audit Log sheet is now the real,
-    // permanent record, so this doesn't need to duplicate every entry
-    // inline anymore. Just a count and a pointer to where the full detail
-    // actually lives.
-    toggle.textContent = mentorActionHistory.length === 0
+
+    let count = 0;
+    try {
+      await Excel.run(async (context) => {
+        const logSheet = context.workbook.worksheets.getItemOrNullObject("MENTOR Audit Log");
+        logSheet.load("isNullObject");
+        await context.sync();
+        if (logSheet.isNullObject) return; // count stays 0 — sheet doesn't exist (never created, or removed via Undo)
+
+        const usedRange = logSheet.getUsedRangeOrNullObject();
+        usedRange.load("isNullObject, rowCount");
+        await context.sync();
+        if (usedRange.isNullObject) return; // sheet exists but is empty
+
+        count = Math.max(0, usedRange.rowCount - 1); // minus the header row
+      });
+    } catch (error) {
+      console.error("MENTOR: failed to read Audit Log row count", error);
+    }
+
+    toggle.textContent = count === 0
       ? "Nothing logged yet"
-      : mentorActionHistory.length + " action" + (mentorActionHistory.length === 1 ? "" : "s") + " logged — see 'MENTOR Audit Log' sheet for details";
-  
+      : count + " action" + (count === 1 ? "" : "s") + " logged — see 'MENTOR Audit Log' sheet for details";
+
     if (list) list.innerHTML = "";
+  }
+
+  // Kept as the call site every existing "something happened" flow already
+  // uses — its job is now just "the display might be stale, go recheck",
+  // not to remember the description itself.
+  function mentorLogAction(description) {
+    mentorRefreshActionCount();
   }
   
   window.mentorToggleHistory = function() {
@@ -1419,12 +1469,27 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
   window.mentorAcceptStage = async function(action) {
     try {
       await Excel.run(async (context) => {
-        const sheet = context.workbook.worksheets.getActiveWorksheet();
-        sheet.load("name");
+        // Stages from detectReportStage now name the exact sheet they were
+        // computed for (see the "which sheet does this apply to" fix) —
+        // resolve THAT sheet by name rather than "whatever's active now",
+        // so what the prompt promised is exactly what runs even if the
+        // active sheet changed in between showing the badge and clicking it.
+        // Stage types that don't set sheetName (hard-case/document* notes,
+        // which are always about the currently active row) fall back to the
+        // active sheet, unchanged from before.
+        const targetSheetName = mentorCurrentStage && mentorCurrentStage.sheetName;
+        const sheet = targetSheetName ? context.workbook.worksheets.getItemOrNullObject(targetSheetName) : context.workbook.worksheets.getActiveWorksheet();
+        sheet.load("name, isNullObject");
+        await context.sync();
+        if (sheet.isNullObject) {
+          mentorLogAction("Tried to act on '" + targetSheetName + "' but it no longer exists — nothing changed");
+          hideMentorBadge();
+          return;
+        }
         const usedRange = sheet.getUsedRangeOrNullObject();
         usedRange.load("rowCount, columnCount, values");
         await context.sync();
-  
+
         if (action === "documentVendorMerge" || action === "documentMissingInvoice" || action === "documentVatIssue" || action === "documentPriceAmbiguity" || action === "documentCommissionChange" || action === "documentMessyDate" || action === "documentTroncExclusion") {
           const targetAddress = mentorCurrentStage && mentorCurrentStage.targetAddress;
           const noteText = (mentorCurrentStage && mentorCurrentStage.message) || "Noted by MENTOR.";
@@ -1589,20 +1654,49 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
         if (action === "insertTotals") {
           const lastRow = usedRange.rowCount;
           const colCount = usedRange.columnCount;
+          const values = usedRange.values;
           const totalsRowIndex = lastRow + 1;
-          const totalsRange = sheet.getRangeByIndexes(totalsRowIndex - 1, 0, 1, colCount);
+
+          // Only sum/format columns that actually hold numbers in the data
+          // rows (row 0 is the header) — summing a text column (labels,
+          // GSTINs, invoice numbers) just shows a meaningless 0 in the
+          // totals row, which reads as a real figure at a glance on a
+          // sheet meant for financial review.
+          const numericCols = [];
+          for (let c = 0; c < colCount; c++) {
+            const hasNumber = values.slice(1).some((row) => typeof row[c] === "number");
+            if (hasNumber) numericCols.push(c);
+          }
+
           const formulaRow = [];
           for (let c = 0; c < colCount; c++) {
             if (c === 0) {
               formulaRow.push("Total");
-            } else {
+            } else if (numericCols.includes(c)) {
               const colLetter = String.fromCharCode(65 + c);
               formulaRow.push("=SUM(" + colLetter + "2:" + colLetter + lastRow + ")");
+            } else {
+              formulaRow.push("");
             }
           }
+          const totalsRange = sheet.getRangeByIndexes(totalsRowIndex - 1, 0, 1, colCount);
           totalsRange.formulas = [formulaRow];
           totalsRange.format.font.bold = true;
-          mentorLogAction("Added a Totals row on '" + sheet.name + "' (row " + totalsRowIndex + ")");
+
+          // Proper number/currency formatting on every numeric column —
+          // both its data rows and the new totals row — not just a raw
+          // unformatted SUM, since these are figures the user may hand off.
+          // Same format string the P&L accounting-formatting pass already
+          // uses elsewhere in this file, so formatting stays consistent
+          // across everything MENTOR formats.
+          const CURRENCY_FORMAT = "£#,##0.00";
+          for (const c of numericCols) {
+            const colLetter = String.fromCharCode(65 + c);
+            const formatRange = sheet.getRange(colLetter + "2:" + colLetter + totalsRowIndex);
+            formatRange.numberFormat = Array.from({ length: totalsRowIndex - 1 }, () => [CURRENCY_FORMAT]);
+          }
+
+          mentorLogAction("Added a formatted Totals row on '" + sheet.name + "' (row " + totalsRowIndex + "), with number formatting applied to " + numericCols.length + " numeric column(s)");
         }
   
         if (action === "insertVariance") {
@@ -1697,7 +1791,7 @@ const { mentorSheetMemoryInit } = require("./mentor-sheet-memory-ui.js");
   
   const mentorManualSteps = {
     insertLayout: "1. Type 'Monthly Report' in A1.\n2. Type 'Period:' in A2.\n3. Add column headers (Category, This Month, Last Month, Variance) in row 4.",
-    insertTotals: "1. Go to the row below your last data row.\n2. Type 'Total' in column A.\n3. In each numeric column, use =SUM() over the data rows.",
+    insertTotals: "1. Go to the row below your last data row.\n2. Type 'Total' in column A.\n3. In each numeric column, use =SUM() over the data rows.\n4. Apply a number/currency format to those columns so the figures are readable, not raw unformatted numbers.",
     insertVariance: "1. Add a 'Variance' header in the next empty column.\n2. Use =ThisMonth-LastMonth for each row.",
     documentVendorMerge: "1. Right-click the Food Cost cell and insert a comment.\n2. Note that both vendor names refer to the same supplier, renamed mid-period.\n3. Keep invoices from both names included in your total — don't drop either one.",
     documentMissingInvoice: "1. Check the Bank Statement sheet for the payment in question.\n2. Contact the vendor and request the missing invoice.\n3. Note the follow-up directly on this cell until the invoice arrives, so it isn't forgotten.",
