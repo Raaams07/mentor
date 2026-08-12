@@ -28,6 +28,7 @@ src/sheet-classifier/data/
 
 # Real company GST data used for local validation only — never committed
 src/demo-data/GST_2A_Books_Demo.xlsx
+src/demo-data/2A Reco till Feb.xlsx
 src/gst-reconciliation/ground-truth/
 
 # Local Anthropic API key for the vendor-suggestion proxy (server/mentor-suggestions-proxy.js) — never committed

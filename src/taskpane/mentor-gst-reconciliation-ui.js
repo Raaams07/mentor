@@ -25,16 +25,22 @@
  */
 
 const { extractSheetSignals } = require("../sheet-classifier/signal-extractor.js");
+const { computeGstSourceDataHash } = require("./gst-source-data-hash.js");
 const { recognizeGstSheets } = require("../gst-reconciliation/gst-reconciliation.js");
 const { identifyGstWorkflow } = require("../gst-reconciliation/gst-workflows.js");
 const { reconcileGstr2aVsBooks } = require("../gst-reconciliation/gstr2a-vs-books-reconciler.js");
 const { detectWrongHead } = require("../gst-reconciliation/wrong-head-detector.js");
+const { detectCrossSheetWrongHead } = require("../gst-reconciliation/cross-sheet-wrong-head-detector.js");
+const { detectInvoiceLevelExtras } = require("../gst-reconciliation/extra-invoice-detector.js");
 const { detectRcmForSheet } = require("../gst-reconciliation/rcm-detector.js");
 const { detectIneligibleItcForSheet } = require("../gst-reconciliation/ineligible-itc-detector.js");
 const { findDuplicateInvoices } = require("../gst-reconciliation/duplicate-invoice-detector.js");
-const { writeGstReconciliationReport, GST_REPORT_SHEET_NAMES, GST_EXPLAIN_SHEET_NAMES, explainGstRow, appendIneligibleItcVendorSuggestions } = require("./gst-report-writer.js");
+const { detectRateMismatch } = require("../gst-reconciliation/rate-mismatch-detector.js");
+const { writeGstReconciliationReport, GST_REPORT_SHEET_NAMES, GST_EXPLAIN_SHEET_NAMES, explainGstRow, appendIneligibleItcVendorSuggestions, readGstTopIssuesFromExistingSheets } = require("./gst-report-writer.js");
 const { extractDistinctVendors } = require("./ineligible-itc-vendor-extraction.js");
 const { MENTOR_OWNED_SHEET_NAMES } = require("./mentor-sheet-memory-ui.js");
+const { mentorResolveGstColumns, mentorShowColumnMemoryQueue, mentorHideColumnMemoryQueue, COLUMN_MEMORY_SHEET_NAME } = require("./mentor-column-memory-ui.js");
+const { mentorExplainGstSummaryRow } = require("./mentor-gst-summary-explain.js");
 
 // Local proxy server (server/mentor-suggestions-proxy.js) — holds the
 // Anthropic API key server-side so it's never embedded in this bundled
@@ -51,6 +57,17 @@ const MENTOR_SUGGESTIONS_PROXY_URL = "http://localhost:3001/api/ineligible-itc-v
 // and taskpane.js's own onSheetChanged exclusion checks skip these sheets
 // too, without editing either of those files.
 GST_REPORT_SHEET_NAMES.forEach((name) => MENTOR_OWNED_SHEET_NAMES.add(name));
+MENTOR_OWNED_SHEET_NAMES.add(COLUMN_MEMORY_SHEET_NAME);
+
+// Placeholder client identifier, scoped to this workbook file — same
+// mechanism and same rationale as mentor-sheet-memory-ui.js's own
+// mentorGetSheetMemoryClientId(), duplicated here (not imported) since
+// that function isn't exported and column-memory's clientId scoping is
+// conceptually independent of sheet-memory's, even though the value is
+// currently identical.
+function mentorGetColumnMemoryClientId(workbookName) {
+  return "workbook:" + workbookName;
+}
 
 let mentorGstLogAction = null;
 let mentorGstAppendAuditLogRow = null;
@@ -76,6 +93,15 @@ let mentorGstIneligibleItcSuggestionError = "";
 
 function mentorGstWorkbookKey(gstr2aName, booksName) {
   return gstr2aName + "::" + booksName;
+}
+
+// context.workbook.settings is persisted IN the document itself (per
+// file, per add-in) — survives close/reopen, unlike any in-memory Set.
+// Storing the source-data hash here (not on a visible sheet) is what
+// lets MENTOR tell "have 2A/Books actually changed since I last
+// generated these sheets" across sessions, not just within one.
+function mentorGstDataHashSettingKey(gstr2aName, booksName) {
+  return "MENTOR_GST_DATA_HASH::" + mentorGstWorkbookKey(gstr2aName, booksName);
 }
 
 function mentorGstDebounce(fn, ms) {
@@ -110,6 +136,7 @@ async function mentorGstReconciliationInit(logAction, appendAuditLogRow) {
 async function mentorScanForGstReconciliation() {
   try {
     await Excel.run(async (context) => {
+      context.workbook.load("name");
       const sheets = context.workbook.worksheets;
       sheets.load("items/name");
       await context.sync();
@@ -156,11 +183,88 @@ async function mentorScanForGstReconciliation() {
         return;
       }
 
-      console.log("MENTOR GST reconciliation: workflow recognized — 2A='" + gstr2aSheet.sheetName + "', Books='" + booksSheet.sheetName + "'. Computing...");
-      const proposal = mentorComputeGstReconciliation(gstr2aSheet, booksSheet);
+      // Has the underlying 2A/Books data actually changed since MENTOR
+      // last generated these sheets? If the output sheets still exist AND
+      // the data hasn't moved, stay completely silent — no proposal card,
+      // no re-scan noise, no Audit Log entry. This is what makes a plain
+      // Excel close/reopen with zero edits a no-op instead of re-running
+      // the whole pipeline and re-prompting every single session.
+      const hashSettingKey = mentorGstDataHashSettingKey(gstr2aSheet.sheetName, booksSheet.sheetName);
+      const currentDataHash = computeGstSourceDataHash(gstr2aSheet.result.values, booksSheet.result.values);
+      const hashSetting = context.workbook.settings.getItemOrNullObject(hashSettingKey);
+      hashSetting.load("value");
+      await context.sync();
+      const storedDataHash = hashSetting.isNullObject ? null : hashSetting.value;
+
+      if (alreadyGenerated && storedDataHash === currentDataHash) {
+        // Silent for the REGENERATE PROMPT specifically — nothing needs
+        // regenerating. The persistent Top Issues/summary card is a
+        // SEPARATE concern from that prompt and should still show
+        // whenever generated sheets exist, read directly off those
+        // sheets (no re-run, no write, no Audit Log entry) rather than
+        // tied to the accept flow the way it used to be — that coupling
+        // was the actual bug: the "stay silent" fix suppressed the
+        // summary along with the prompt, since both used to only ever
+        // get populated as a side effect of clicking Generate/Regenerate.
+        console.log("MENTOR GST reconciliation: '" + key + "' — source data unchanged since the last generation; regenerate prompt stays silent, summary still shown");
+        const quietProposal = mentorComputeGstReconciliation(gstr2aSheet, booksSheet);
+        await mentorShowPersistentGstSummary(context, quietProposal, null);
+        return;
+      }
+
+      console.log(
+        "MENTOR GST reconciliation: workflow recognized — 2A='" + gstr2aSheet.sheetName + "', Books='" + booksSheet.sheetName + "'. " +
+        (storedDataHash === null ? "No prior generation recorded." : storedDataHash === currentDataHash ? "Data unchanged, but output sheets are missing." : "Source data has changed since the last generation.") +
+        " Resolving columns..."
+      );
+
+      // Every field a current or future rule depends on gets resolved here
+      // — from column memory where possible, otherwise queued as a
+      // blocking prompt. No Generate/Regenerate proposal is computed (let
+      // alone shown) until every ambiguous/missing-required field on BOTH
+      // sheets is resolved — this is what stops a repeat of the Tally CGST
+      // bug from ever reaching a proposal silently.
+      const clientId = mentorGetColumnMemoryClientId(context.workbook.name);
+      const resolution = await mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet });
+
+      if (resolution.blocked) {
+        mentorHideGstProposalCard();
+        mentorPendingGstProposal = null;
+        console.log(
+          "MENTOR GST reconciliation: '" + key + "' blocked — " + resolution.pendingPrompts.length +
+          " column(s) need confirmation before reconciliation can run: " +
+          resolution.pendingPrompts.map((p) => p.sheetName + "::" + p.fieldName).join(", ")
+        );
+        mentorShowColumnMemoryQueue(resolution.pendingPrompts, mentorScanForGstReconciliation, mentorGstAppendAuditLogRow, mentorGstLogAction);
+        return;
+      }
+      mentorHideColumnMemoryQueue(); // a previously-blocked pair is now fully resolved — clear that UI if it was showing
+
+      // gstr2aSheet/booksSheet's .result.columns are shallow-merged with
+      // the newly resolved fields before being handed to
+      // mentorComputeGstReconciliation() — every downstream detector and
+      // gst-report-writer.js keeps reading a plain columns object,
+      // identical shape to what identifyGstColumns() has always returned.
+      const resolvedGstr2aSheet = { ...gstr2aSheet, result: { ...gstr2aSheet.result, columns: { ...gstr2aSheet.result.columns, ...resolution.resolvedColumns.gstr2a } } };
+      const resolvedBooksSheet = { ...booksSheet, result: { ...booksSheet.result, columns: { ...booksSheet.result.columns, ...resolution.resolvedColumns.books } } };
+
+      console.log("MENTOR GST reconciliation: '" + key + "' — columns resolved, computing...");
+      const proposal = mentorComputeGstReconciliation(resolvedGstr2aSheet, resolvedBooksSheet);
       proposal.alreadyGenerated = alreadyGenerated;
+      proposal.dataHashSettingKey = hashSettingKey;
+      proposal.currentDataHash = currentDataHash;
       mentorPendingGstProposal = proposal;
-      mentorShowGstProposalCard(proposal);
+
+      if (alreadyGenerated) {
+        // Data has changed but sheets already exist — show the persistent
+        // summary (from the LAST generation, clearly labeled as such) WITH
+        // the regenerate banner on top, rather than replacing the summary
+        // with a bare prompt.
+        await mentorShowPersistentGstSummary(context, proposal, proposal);
+      } else {
+        // Never generated at all — nothing to read back yet.
+        mentorShowGstProposalCard(proposal);
+      }
     });
   } catch (error) {
     console.error("MENTOR GST reconciliation scan error:", error);
@@ -176,11 +280,33 @@ function mentorComputeGstReconciliation(gstr2aSheet, booksSheet) {
 
   const comparisonSummary = reconcileGstr2aVsBooks(gstr2aInput, booksInput);
   const wrongHeadResult = detectWrongHead(gstr2aInput.values, gstr2aInput.headerRowIndex, gstr2aInput.columns);
+  const crossSheetWrongHeadResult = detectCrossSheetWrongHead(gstr2aInput, booksInput);
 
+  // Computed BEFORE invoiceLevelExtrasResult (below) — an invoice already
+  // correctly classified as RCM has no reason to also independently exist
+  // in Books under the ordinary vendor-matched ITC flow, so it must be
+  // excluded from Extra-in-2A/Extra-in-Books rather than flagged under
+  // two contradictory theories at once. See extra-invoice-detector.js's
+  // docstring for the real-data case this fixes.
   const rcmBySource = [
     { sheetName: gstr2aSheet.sheetName, role: "gstr2a", ...gstr2aInput, result: detectRcmForSheet(gstr2aInput.values, gstr2aInput.headerRowIndex, gstr2aInput.columns) },
     { sheetName: booksSheet.sheetName, role: "purchase_register", ...booksInput, result: detectRcmForSheet(booksInput.values, booksInput.headerRowIndex, booksInput.columns) },
   ];
+  const gstr2aRcmRowIndices = new Set(rcmBySource[0].result.flagged.map((f) => f.rowIndex));
+  const booksRcmRowIndices = new Set(rcmBySource[1].result.flagged.map((f) => f.rowIndex));
+
+  // Invoice-level (GSTIN + Invoice/Voucher Number), NOT Step 1's
+  // GSTIN-aggregate vendor status — see extra-invoice-detector.js's
+  // docstring for why vendor-level presence hides real per-invoice gaps.
+  // This is the source of truth for Extra in 2A / Extra in Books; Step
+  // 1's comparisonSummary.counts.missing_in_books/missing_in_gstr2a stay
+  // as a separate, higher-level vendor-status count only (Summary sheet's
+  // "Vendor match status" section).
+  const invoiceLevelExtrasResult = detectInvoiceLevelExtras(gstr2aInput, booksInput, {
+    gstr2aExcludedRowIndices: gstr2aRcmRowIndices,
+    booksExcludedRowIndices: booksRcmRowIndices,
+  });
+
   const itcBySource = [
     { sheetName: gstr2aSheet.sheetName, role: "gstr2a", ...gstr2aInput, result: detectIneligibleItcForSheet(gstr2aInput.values, gstr2aInput.headerRowIndex, gstr2aInput.columns) },
     { sheetName: booksSheet.sheetName, role: "purchase_register", ...booksInput, result: detectIneligibleItcForSheet(booksInput.values, booksInput.headerRowIndex, booksInput.columns) },
@@ -190,33 +316,65 @@ function mentorComputeGstReconciliation(gstr2aSheet, booksSheet) {
     { sheetName: booksSheet.sheetName, role: "purchase_register", ...booksInput, result: findDuplicateInvoices(booksInput.values, booksInput.headerRowIndex, booksInput.columns) },
   ];
 
+  // Pattern-agnostic sanity-check backstop (rate-mismatch-detector.js) —
+  // informational only, same treatment as Wrong Head: never blocks, never
+  // changes the net eligible ITC figure. Silently not-applicable on a
+  // sheet with no resolved Rate column (rate is optional, never asked
+  // about — see gst-column-ambiguity-rules.js).
+  const rateMismatchBySource = [
+    { sheetName: gstr2aSheet.sheetName, role: "gstr2a", ...gstr2aInput, result: detectRateMismatch(gstr2aInput.values, gstr2aInput.headerRowIndex, gstr2aInput.columns) },
+    { sheetName: booksSheet.sheetName, role: "purchase_register", ...booksInput, result: detectRateMismatch(booksInput.values, booksInput.headerRowIndex, booksInput.columns) },
+  ];
+
+  // Cross-sheet Wrong Head findings count toward the SAME "Wrong Head"
+  // category, not a separate one — it's a complementary check for the
+  // same kind of issue (see cross-sheet-wrong-head-detector.js), not a
+  // new category of finding.
+  const hasWrongHeadFindings =
+    (wrongHeadResult.applicable && wrongHeadResult.flagged.length > 0) || (crossSheetWrongHeadResult.applicable && crossSheetWrongHeadResult.flagged.length > 0);
+
+  const hasExtraIn2AFindings = invoiceLevelExtrasResult.applicable && invoiceLevelExtrasResult.extraIn2A.length > 0;
+  const hasExtraInBooksFindings = invoiceLevelExtrasResult.applicable && invoiceLevelExtrasResult.extraInBooks.length > 0;
+  // Low-confidence amount+GSTIN fallback (Fix 4) — surfaced as its own
+  // category so it's visible in the sidebar, but never netted into either
+  // Extra total; see extra-invoice-detector.js's "POSSIBLE MATCH" docstring.
+  const hasPossibleMatchFindings = invoiceLevelExtrasResult.applicable && invoiceLevelExtrasResult.possibleMatches.length > 0;
+
   const categoriesWithFindings = [
     comparisonSummary.counts.discrepancy > 0,
-    comparisonSummary.counts.missing_in_books > 0,
-    comparisonSummary.counts.missing_in_gstr2a > 0,
-    wrongHeadResult.applicable && wrongHeadResult.flagged.length > 0,
+    hasExtraIn2AFindings,
+    hasExtraInBooksFindings,
+    hasPossibleMatchFindings,
+    hasWrongHeadFindings,
     rcmBySource.some((s) => s.result.flagged.length > 0),
     itcBySource.some((s) => s.result.applicable && s.result.flagged.length > 0),
     dupBySource.some((s) => s.result.applicable && s.result.clusters.length > 0),
+    rateMismatchBySource.some((s) => s.result.applicable && s.result.flagged.length > 0),
   ].filter(Boolean).length;
 
   const unresolvedItemCount =
     comparisonSummary.counts.discrepancy +
-    comparisonSummary.counts.missing_in_books +
-    comparisonSummary.counts.missing_in_gstr2a +
+    (invoiceLevelExtrasResult.applicable ? invoiceLevelExtrasResult.extraIn2A.length : 0) +
+    (invoiceLevelExtrasResult.applicable ? invoiceLevelExtrasResult.extraInBooks.length : 0) +
+    (invoiceLevelExtrasResult.applicable ? invoiceLevelExtrasResult.possibleMatches.length : 0) +
     (wrongHeadResult.applicable ? wrongHeadResult.flagged.length : 0) +
+    (crossSheetWrongHeadResult.applicable ? crossSheetWrongHeadResult.flagged.length : 0) +
     rcmBySource.reduce((sum, s) => sum + s.result.flagged.length, 0) +
     itcBySource.reduce((sum, s) => sum + (s.result.applicable ? s.result.flagged.length : 0), 0) +
-    dupBySource.reduce((sum, s) => sum + (s.result.applicable ? s.result.clusters.length : 0), 0);
+    dupBySource.reduce((sum, s) => sum + (s.result.applicable ? s.result.clusters.length : 0), 0) +
+    rateMismatchBySource.reduce((sum, s) => sum + (s.result.applicable ? s.result.flagged.length : 0), 0);
 
   return {
     key: mentorGstWorkbookKey(gstr2aSheet.sheetName, booksSheet.sheetName),
     sheetNames: { gstr2a: gstr2aSheet.sheetName, books: booksSheet.sheetName },
     comparisonSummary,
+    invoiceLevelExtrasResult,
     wrongHeadResult,
+    crossSheetWrongHeadResult,
     rcmBySource,
     itcBySource,
     dupBySource,
+    rateMismatchBySource,
     totalVendors: comparisonSummary.totalGstins,
     matchedVendors: comparisonSummary.counts.matched,
     categoriesWithFindings,
@@ -226,6 +384,62 @@ function mentorComputeGstReconciliation(gstr2aSheet, booksSheet) {
 
 function mentorGstEscapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Vendor-name suggestion trigger: only when Ineligible ITC's own
+// description-based check found literally nothing (see
+// ineligible-itc-detector.js — this never loosens that check, it's a
+// separate, optional, explicitly user-triggered addition for exactly the
+// case where there was nothing for it to work with). Shared by both the
+// accept flow (fresh generation) and the read-back path (persistent
+// summary on an unchanged session) — same proposal shape either way.
+function mentorGstSetupIneligibleItcVendorTrigger(proposal) {
+  const itcFlaggedCount = proposal.itcBySource.reduce((sum, s) => sum + (s.result.applicable ? s.result.flagged.length : 0), 0);
+  if (itcFlaggedCount === 0) {
+    const gstr2aSource = proposal.itcBySource.find((s) => s.role === "gstr2a");
+    const booksSource = proposal.itcBySource.find((s) => s.role === "purchase_register");
+    mentorGstIneligibleItcVendors = extractDistinctVendors(
+      { values: gstr2aSource.values, headerRowIndex: gstr2aSource.headerRowIndex, columns: gstr2aSource.columns },
+      { values: booksSource.values, headerRowIndex: booksSource.headerRowIndex, columns: booksSource.columns }
+    );
+  } else {
+    mentorGstIneligibleItcVendors = null;
+  }
+  mentorGstIneligibleItcSuggestionState = "idle";
+  mentorGstIneligibleItcSuggestionResult = null;
+  mentorGstIneligibleItcSuggestionError = "";
+}
+
+// Populates and renders the PERSISTENT summary card by reading Top Issues
+// directly off the already-generated sheets (readGstTopIssuesFromExisting
+// Sheets — a pure read, no write, no Audit Log entry) — used both when
+// staying silent (regenerateProposal: null, no banner) and when source
+// data has changed but sheets still exist (regenerateProposal: the
+// pending proposal, shown as a banner above the — still last-generation —
+// summary). proposal: mentorComputeGstReconciliation()'s read-only result,
+// used only for the vendor-suggestion trigger and (when regenerating) the
+// banner's own counts — NOT for the Top Issues numbers themselves, which
+// always come from the sheets.
+async function mentorShowPersistentGstSummary(context, proposal, regenerateProposal) {
+  const readBack = await readGstTopIssuesFromExistingSheets(context);
+  if (!readBack) {
+    // Sheets unexpectedly missing despite alreadyGenerated being true —
+    // fall back to the normal propose/generate flow rather than showing
+    // an empty or broken summary.
+    mentorPendingGstProposal = proposal;
+    mentorShowGstProposalCard(proposal);
+    return;
+  }
+
+  mentorGstTopIssues = readBack.topIssues;
+  mentorGstTopIssuesShowAll = false;
+  mentorGstConfirmationPreamble =
+    "On file — " + readBack.topIssues.length + " item(s) currently flagged across the generated 'GST - ...' sheets" +
+    " (Priority 1 threshold: RCM/Ineligible ITC items ≥ " + mentorGstFormatAmount(readBack.materialityThreshold) + ").";
+
+  mentorGstSetupIneligibleItcVendorTrigger(proposal);
+  mentorPendingGstProposal = regenerateProposal;
+  mentorRenderGstTopIssuesList();
 }
 
 /* ============================================================
@@ -243,14 +457,24 @@ function mentorRenderGstExplainHtml(explanation) {
   html += "<strong style='color:#fff;'>" + mentorGstEscapeHtml(explanation.ruleLabel) + "</strong><br/>";
   html += mentorGstEscapeHtml(explanation.whichRuleFired) + "<br/>";
   html += "<div style='margin-top:4px;color:#9aa0a6;'>" + mentorGstEscapeHtml(explanation.legalCitation) + "</div>";
-  html += "<div style='margin-top:6px;padding-top:6px;border-top:1px solid #333;'>";
-  if (explanation.reviewerStatus || explanation.reviewerNote) {
-    html += "<strong>Reviewer:</strong> " + (explanation.reviewerStatus ? mentorGstEscapeHtml(explanation.reviewerStatus) : "(no status set)");
-    if (explanation.reviewerNote) html += " — " + mentorGstEscapeHtml(explanation.reviewerNote);
-  } else {
-    html += "<span style='color:#7d828a;'>Not yet reviewed — set Reviewer Status/Note directly on this row.</span>";
+  // Reviewer Status/Note only applies to a flagged row on one of the 8 rule
+  // sheets — every caller there always passes real strings (possibly
+  // empty), even when blank. A caller with no concept of "reviewer" at all
+  // (e.g. Summary-row column traceability) leaves both fields genuinely
+  // undefined, which suppresses this whole block rather than showing the
+  // misleading "Not yet reviewed" nudge for something that isn't a
+  // reviewable item.
+  if (explanation.reviewerStatus !== undefined || explanation.reviewerNote !== undefined) {
+    html += "<div style='margin-top:6px;padding-top:6px;border-top:1px solid #333;'>";
+    if (explanation.reviewerStatus || explanation.reviewerNote) {
+      html += "<strong>Reviewer:</strong> " + (explanation.reviewerStatus ? mentorGstEscapeHtml(explanation.reviewerStatus) : "(no status set)");
+      if (explanation.reviewerNote) html += " — " + mentorGstEscapeHtml(explanation.reviewerNote);
+    } else {
+      html += "<span style='color:#7d828a;'>Not yet reviewed — set Reviewer Status/Note directly on this row.</span>";
+    }
+    html += "</div>";
   }
-  html += "</div></div>";
+  html += "</div>";
   return html;
 }
 
@@ -260,6 +484,52 @@ function mentorHideGstExplain() {
     container.style.display = "none";
     container.innerHTML = "";
   }
+}
+
+// Part 3 — column traceability for "GST - Summary" rows. summaryValues:
+// the Summary sheet's full used-range values, already read fresh by the
+// caller. Delegates the actual explanation to mentor-gst-summary-explain.js
+// (which re-derives the current resolved columns live — see that file's
+// docstring for why) and renders it through the SAME mentorRenderGstExplainHtml
+// every other GST sheet's point-and-explain already uses — no new UI.
+async function mentorRenderGstSummaryExplain(context, container, summaryValues, selectedRowIndex) {
+  const row = summaryValues[selectedRowIndex];
+  if (!row) {
+    mentorHideGstExplain();
+    return;
+  }
+  // NOT trimmed — GST_SUMMARY_ROW_TRACEABILITY's keys deliberately include
+  // the leading two-space indentation writeSummarySheet() itself writes
+  // for sub-items, and Excel preserves leading whitespace in a text cell
+  // verbatim, so the lookup must match that exactly.
+  const rowLabel = String(row[0] === undefined || row[0] === null ? "" : row[0]);
+
+  const gstr2aSheetName = summaryValues[1] && summaryValues[1][1]; // "2A sheet" row
+  const booksSheetName = summaryValues[2] && summaryValues[2][1]; // "Books sheet" row
+
+  let explanation = null;
+  if (gstr2aSheetName && booksSheetName) {
+    try {
+      explanation = await mentorExplainGstSummaryRow(context, rowLabel, gstr2aSheetName, booksSheetName);
+    } catch (error) {
+      console.error("MENTOR GST summary explain error:", error);
+    }
+  }
+
+  if (!explanation) {
+    // Not a traceable total (a section header, the title, plain vendor
+    // counts) or the source sheets couldn't currently be read — same
+    // fallback message as before, slightly reworded now that some rows
+    // ARE explainable.
+    container.innerHTML =
+      "<div style='background:#1a1a2e;border-left:4px solid #6c757d;padding:8px 10px;border-radius:6px;font-size:11px;color:#9aa0a6;'>" +
+      "Not a traceable total — select one of the Summary sheet's total/subtotal lines for its source column(s), or a row on one of the other 'GST - ...' sheets for row-level detail.</div>";
+    container.style.display = "block";
+    return;
+  }
+
+  container.innerHTML = mentorRenderGstExplainHtml(explanation);
+  container.style.display = "block";
 }
 
 async function mentorGstOnSelectionChanged(event) {
@@ -279,14 +549,6 @@ async function mentorGstOnSelectionChanged(event) {
         return;
       }
 
-      if (isGstSummary) {
-        container.innerHTML =
-          "<div style='background:#1a1a2e;border-left:4px solid #6c757d;padding:8px 10px;border-radius:6px;font-size:11px;color:#9aa0a6;'>" +
-          "The Summary sheet is an aggregate report, not row-per-item — select a row on one of the other 'GST - ...' sheets for row-level detail.</div>";
-        container.style.display = "block";
-        return;
-      }
-
       const address = event && event.address;
       const rowMatch = address && address.match(/([A-Z]+)(\d+)/); // first row of the selection, even for a multi-cell drag
       if (!rowMatch) {
@@ -300,6 +562,11 @@ async function mentorGstOnSelectionChanged(event) {
       await context.sync();
       if (usedRange.isNullObject) {
         mentorHideGstExplain();
+        return;
+      }
+
+      if (isGstSummary) {
+        await mentorRenderGstSummaryExplain(context, container, usedRange.values, selectedRowIndex);
         return;
       }
 
@@ -395,23 +662,50 @@ function mentorRenderIneligibleItcSuggestionSectionHtml() {
   return html;
 }
 
+// Shown INSIDE the persistent summary card, above the Top Issues list,
+// only when mentorPendingGstProposal is set for an ALREADY-generated
+// pair (i.e. source data has changed since the last generation). The
+// summary below it still reflects the LAST generation — labeled as such,
+// since it's a pure read of the currently-written sheets, not the new
+// data — so it's never presented as if it already matches what changed.
+function mentorRenderGstRegenerateBannerHtml() {
+  if (!mentorPendingGstProposal || !mentorPendingGstProposal.alreadyGenerated) return "";
+  const proposal = mentorPendingGstProposal;
+  const message =
+    "Source data has changed since these sheets were last generated — re-checking now shows " +
+    proposal.matchedVendors + " of " + proposal.totalVendors + " vendors matched, " + proposal.unresolvedItemCount +
+    " item(s) across " + proposal.categoriesWithFindings + " categor" + (proposal.categoriesWithFindings === 1 ? "y" : "ies") + ".";
+
+  let html = "<div style='margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #3a3d45;'>";
+  html += "<div style='color:#f0b429;margin-bottom:6px;'>" + mentorGstEscapeHtml(message) + " The summary below still reflects the LAST generation.</div>";
+  html += "<button onclick='mentorAcceptGstReconciliation()' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Regenerate the sheets</button>";
+  html += "<button onclick='mentorDismissGstReconciliation()' style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Not now</button>";
+  html += "</div>";
+  return html;
+}
+
 function mentorRenderGstTopIssuesList() {
   const container = document.getElementById("mentor-gst-reconciliation-prompt");
   if (!container) return;
 
+  const banner = mentorRenderGstRegenerateBannerHtml();
+
   if (mentorGstTopIssues.length === 0) {
     container.innerHTML =
       "<div style='background:#1a1a2e;border-left:4px solid #28a745;padding:8px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;'>" +
+      banner +
       mentorGstEscapeHtml(mentorGstConfirmationPreamble) +
       " No issues found — every vendor matched and no line items were flagged." +
       mentorRenderIneligibleItcSuggestionSectionHtml() +
       "</div>";
+    container.style.display = "block";
     return;
   }
 
   const visibleCount = mentorGstTopIssuesShowAll ? mentorGstTopIssues.length : Math.min(MENTOR_GST_TOP_ISSUES_HEADLINE_COUNT, mentorGstTopIssues.length);
 
   let html = "<div style='background:#1a1a2e;border-left:4px solid #28a745;padding:8px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;'>";
+  html += banner;
   html += mentorGstEscapeHtml(mentorGstConfirmationPreamble) + "<br/>";
   html += "<div style='margin-top:6px;color:#9aa0a6;'>Top issues (highest priority, then largest rupee amount, first):</div>";
   html += "<ol style='margin:6px 0 6px 0;padding-left:16px;'>";
@@ -432,6 +726,7 @@ function mentorRenderGstTopIssuesList() {
   html += "</div>";
 
   container.innerHTML = html;
+  container.style.display = "block";
 }
 
 // vendors: [{gstin, vendorName}, ...] already deduplicated by
@@ -533,15 +828,27 @@ window.mentorAcceptGstReconciliation = async function () {
       const result = await writeGstReconciliationReport(context, {
         sheetNames: proposal.sheetNames,
         comparisonSummary: proposal.comparisonSummary,
+        invoiceLevelExtrasResult: proposal.invoiceLevelExtrasResult,
         wrongHeadResult: proposal.wrongHeadResult,
+        crossSheetWrongHeadResult: proposal.crossSheetWrongHeadResult,
         rcmBySource: proposal.rcmBySource,
         itcBySource: proposal.itcBySource,
         dupBySource: proposal.dupBySource,
+        rateMismatchBySource: proposal.rateMismatchBySource,
       });
       summary = result.summary;
       reviewPreservation = result.reviewPreservation;
       topIssues = result.topIssues;
       materialityThreshold = result.materialityThreshold;
+
+      // Record what data this generation was run against — only after a
+      // SUCCESSFUL write, so a failed generation never gets falsely
+      // marked as "already processed." This is what lets the next scan
+      // (including after a full Excel close/reopen) recognize "nothing's
+      // changed" and stay silent instead of re-prompting.
+      if (proposal.dataHashSettingKey) {
+        context.workbook.settings.add(proposal.dataHashSettingKey, proposal.currentDataHash);
+      }
 
       if (mentorGstAppendAuditLogRow) {
         const preservationNote =
@@ -570,26 +877,8 @@ window.mentorAcceptGstReconciliation = async function () {
       "Reconciliation complete — " + proposal.unresolvedItemCount + " item(s) flagged across " + proposal.categoriesWithFindings + " categories" +
       " (Priority 1 threshold: RCM/Ineligible ITC items ≥ " + mentorGstFormatAmount(materialityThreshold) + ")." + preservationLine;
 
-    // Vendor-name suggestion trigger: only when Ineligible ITC's own
-    // description-based check found literally nothing (see
-    // ineligible-itc-detector.js — this never loosens that check, it's a
-    // separate, optional, explicitly user-triggered addition for exactly
-    // the case where there was nothing for it to work with).
-    const itcFlaggedCount = proposal.itcBySource.reduce((sum, s) => sum + (s.result.applicable ? s.result.flagged.length : 0), 0);
-    if (itcFlaggedCount === 0) {
-      const gstr2aSource = proposal.itcBySource.find((s) => s.role === "gstr2a");
-      const booksSource = proposal.itcBySource.find((s) => s.role === "purchase_register");
-      mentorGstIneligibleItcVendors = extractDistinctVendors(
-        { values: gstr2aSource.values, headerRowIndex: gstr2aSource.headerRowIndex, columns: gstr2aSource.columns },
-        { values: booksSource.values, headerRowIndex: booksSource.headerRowIndex, columns: booksSource.columns }
-      );
-    } else {
-      mentorGstIneligibleItcVendors = null;
-    }
-    mentorGstIneligibleItcSuggestionState = "idle";
-    mentorGstIneligibleItcSuggestionResult = null;
-    mentorGstIneligibleItcSuggestionError = "";
-
+    mentorGstSetupIneligibleItcVendorTrigger(proposal);
+    mentorPendingGstProposal = null; // just written — nothing pending to regenerate
     mentorRenderGstTopIssuesList();
 
     if (mentorGstLogAction) mentorGstLogAction("Generated GST reconciliation review sheets");
@@ -604,11 +893,25 @@ window.mentorAcceptGstReconciliation = async function () {
 };
 
 window.mentorDismissGstReconciliation = function () {
+  const hadPersistentSummary = mentorPendingGstProposal && mentorPendingGstProposal.alreadyGenerated;
   if (mentorPendingGstProposal) mentorGstHandledThisSession.add(mentorPendingGstProposal.key);
   mentorPendingGstProposal = null;
-  mentorHideGstProposalCard();
+  if (hadPersistentSummary) {
+    // Dismissing a regenerate banner on top of an already-generated
+    // sheet set — the persistent summary underneath stays visible, only
+    // the banner (which reads mentorPendingGstProposal) disappears.
+    mentorRenderGstTopIssuesList();
+  } else {
+    // Never-generated case (mentorShowGstProposalCard) — nothing to fall
+    // back to, hide the whole card.
+    mentorHideGstProposalCard();
+  }
 };
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { mentorGstReconciliationInit, mentorScanForGstReconciliation };
+  // mentorComputeGstReconciliation is exported for reuse outside the live
+  // UI (scripts/validate-real-files.js) — it's pure/synchronous (no Excel
+  // calls of its own), so it's safe to call directly once its two sheet
+  // inputs are already resolved.
+  module.exports = { mentorGstReconciliationInit, mentorScanForGstReconciliation, mentorComputeGstReconciliation };
 }
