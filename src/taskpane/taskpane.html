@@ -48,6 +48,19 @@
     </div>
   </div>
 
+  <!-- What MENTOR has learned for this workbook (sheet identities, column
+       mappings) — reviewable and editable/resettable directly here, no
+       need to unhide the underlying memory sheets. -->
+  <div style="margin-top:10px; border-top:1px solid #e2e4e9; padding-top:10px;">
+    <a href="#" id="mentor-memory-review-toggle" onclick="mentorToggleMemoryReview(); return false;"
+       style="font-size:11px; color:#888; text-decoration:underline; cursor:pointer;">
+      Learned answers (0)
+    </a>
+    <div id="mentor-memory-review-list" style="display:none; margin-top:8px;">
+      <div style="color:#c2c6cc; font-size:11px;">Nothing learned yet for this workbook.</div>
+    </div>
+  </div>
+
   <!-- Manual reconciliation tool — kept in the DOM so the existing
        script doesn't break on startup, but fully hidden. Not part of
        the visible product anymore. -->

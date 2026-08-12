@@ -114,6 +114,45 @@ async function rememberColumnField({ clientId, sheetName, sheetSignals, fieldNam
   return store.remember(clientId, { structuralSignature: signature, headerSignature, sheetName, userProvidedLabel: JSON.stringify(blob) });
 }
 
+// Hand-edits or clears ONE field within an existing record's blob, by
+// structuralSignature — used by the "review learned answers" UI, where the
+// user is correcting what's already on file rather than answering a fresh
+// candidate-picker prompt (so this takes free-text header text, not a
+// column index — there may be no live sheet selected to pick a column
+// from). newHeaderText === null removes just that field; if the blob ends
+// up empty, the whole record is forgotten so no orphan zero-field row is
+// left behind. A header that no longer matches any column on the CURRENT
+// sheet isn't an error here — same fail-safe fallback as a normal miss:
+// findStoredColumnIndex() simply won't find it next time, and resolution
+// falls through to needs_input again rather than guessing.
+async function updateStoredColumnField({ clientId, structuralSignature, fieldName, newHeaderText, store }) {
+  if (!clientId) throw new Error("updateStoredColumnField requires a clientId");
+  const existing = await store.findExact(clientId, structuralSignature);
+  if (!existing) return null;
+
+  const blob = parseBlob(existing);
+  if (newHeaderText === null) {
+    delete blob[fieldName];
+  } else {
+    if (!newHeaderText.trim()) throw new Error("updateStoredColumnField requires a non-empty newHeaderText (pass null to clear the field instead)");
+    blob[fieldName] = normalizeHeaderText(newHeaderText);
+  }
+
+  if (Object.keys(blob).length === 0) {
+    await store.forget(clientId, structuralSignature);
+    return { deleted: true };
+  }
+  const updated = await store.updateLabel(clientId, structuralSignature, JSON.stringify(blob));
+  return { deleted: false, record: updated };
+}
+
+// Deletes every field resolved for this sheet shape at once — the next
+// scan that hits this exact shape gets asked about all of them again.
+async function forgetColumnMemoryRecord({ clientId, structuralSignature, store }) {
+  if (!clientId) throw new Error("forgetColumnMemoryRecord requires a clientId");
+  return store.forget(clientId, structuralSignature);
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { resolveColumnField, rememberColumnField, findStoredColumnIndex };
+  module.exports = { resolveColumnField, rememberColumnField, findStoredColumnIndex, parseBlob, updateStoredColumnField, forgetColumnMemoryRecord };
 }

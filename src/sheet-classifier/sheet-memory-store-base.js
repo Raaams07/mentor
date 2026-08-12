@@ -109,6 +109,33 @@ class BaseSheetMemoryStore {
   async list(clientId) {
     return this.records.filter((r) => r.client_id === clientId);
   }
+
+  // Removes the (clientId, structuralSignature) record entirely, if one
+  // exists. Used by the "review learned answers" UI's Reset action — the
+  // next scan that hits this exact shape gets a fresh needs_input prompt
+  // instead of silently reusing whatever was here. Returns whether a
+  // record was actually removed.
+  async forget(clientId, structuralSignature) {
+    const before = this.records.length;
+    this.records = this.records.filter((r) => !(r.client_id === clientId && r.structural_signature === structuralSignature));
+    const removed = this.records.length < before;
+    if (removed) await this._persist();
+    return removed;
+  }
+
+  // Overwrites just the label of an existing (clientId, structuralSignature)
+  // record in place — header_signature/sheet_name_at_creation/created_at are
+  // left untouched. Used by the "review learned answers" UI's Edit action,
+  // where the user is correcting what's already on file rather than
+  // answering a fresh prompt (which goes through remember() instead).
+  // Returns the updated record, or null if nothing was on file to edit.
+  async updateLabel(clientId, structuralSignature, newLabel) {
+    const record = this.records.find((r) => r.client_id === clientId && r.structural_signature === structuralSignature);
+    if (!record) return null;
+    record.user_provided_label = newLabel;
+    await this._persist();
+    return record;
+  }
 }
 
 if (typeof module !== "undefined" && module.exports) {

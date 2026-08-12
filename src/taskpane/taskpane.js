@@ -2,6 +2,7 @@
 
 const { mentorSheetMemoryInit, MENTOR_OWNED_SHEET_NAMES } = require("./mentor-sheet-memory-ui.js");
 const { mentorGstReconciliationInit } = require("./mentor-gst-reconciliation-ui.js");
+const { mentorMemoryReviewInit } = require("./mentor-memory-review-ui.js");
 
 /* ============================================================
    MENTOR — Background Workbook Index
@@ -442,6 +443,7 @@ const { mentorGstReconciliationInit } = require("./mentor-gst-reconciliation-ui.
       mentorInit();
       mentorSheetMemoryInit(mentorLogAction, mentorAppendAuditLogRow);
       mentorGstReconciliationInit(mentorLogAction, mentorAppendAuditLogRow);
+      mentorMemoryReviewInit();
       mentorRefreshActionCount(); // reflect whatever's already on the Audit Log sheet, not just "0" until the next event
     });
   };

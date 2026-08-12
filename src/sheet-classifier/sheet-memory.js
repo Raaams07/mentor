@@ -74,6 +74,26 @@ async function rememberSheetLabel({ clientId, sheetName, sheetSignals, userProvi
   return store.remember(clientId, { structuralSignature: signature, headerSignature, sheetName, userProvidedLabel: userProvidedLabel.trim() });
 }
 
+// Corrects an EXISTING record's label directly, by structuralSignature —
+// used by the "review learned answers" UI, where the user is fixing what's
+// already on file (e.g. a mislabeled sheet) rather than answering a fresh
+// prompt. Unlike rememberSheetLabel, this doesn't need live sheetSignals
+// (the sheet in question may not even be selected, or may have been
+// renamed/removed since it was learned) — it operates purely on the stored
+// record. Returns null if nothing was on file for that signature.
+async function updateStoredSheetLabel({ clientId, structuralSignature, newLabel, store }) {
+  if (!clientId) throw new Error("updateStoredSheetLabel requires a clientId");
+  if (!newLabel || !newLabel.trim()) throw new Error("updateStoredSheetLabel requires a non-empty newLabel");
+  return store.updateLabel(clientId, structuralSignature, newLabel.trim());
+}
+
+// Deletes a sheet-identity record outright — the next scan that hits this
+// exact shape gets asked again instead of silently reusing what was here.
+async function forgetSheetLabel({ clientId, structuralSignature, store }) {
+  if (!clientId) throw new Error("forgetSheetLabel requires a clientId");
+  return store.forget(clientId, structuralSignature);
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { resolveSheetLabel, rememberSheetLabel };
+  module.exports = { resolveSheetLabel, rememberSheetLabel, updateStoredSheetLabel, forgetSheetLabel };
 }

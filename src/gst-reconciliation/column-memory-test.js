@@ -17,9 +17,10 @@
  * Run with: node src/gst-reconciliation/column-memory-test.js
  */
 
-const { resolveColumnField, rememberColumnField } = require("./column-memory.js");
+const { resolveColumnField, rememberColumnField, updateStoredColumnField, forgetColumnMemoryRecord } = require("./column-memory.js");
 const { BaseSheetMemoryStore } = require("../sheet-classifier/sheet-memory-store-base.js");
 const { extractSheetSignals } = require("../sheet-classifier/signal-extractor.js");
+const { computeStructuralSignature } = require("../sheet-classifier/structural-signature.js");
 
 let failures = 0;
 function pass(condition, description) {
@@ -175,12 +176,56 @@ async function runTwoFieldsDontOverwrite() {
   console.log("");
 }
 
+async function runReviewPanelEditAndReset() {
+  console.log("-- Review panel: updateStoredColumnField() edits/clears a field directly, forgetColumnMemoryRecord() clears everything --\n");
+  const store = new BaseSheetMemoryStore();
+  const sheetSignals = tallyLikeSignals("Books");
+  const { signature } = computeStructuralSignature(sheetSignals);
+
+  await rememberColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "gstin", chosenColumnIndex: 0, store });
+  await rememberColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "cgst", chosenColumnIndex: 5, store });
+
+  // Hand-edit "cgst" to point at a different (still real) header -- no live
+  // sheet/column index involved, matching how the review panel calls this.
+  await updateStoredColumnField({ clientId: CLIENT_ID, structuralSignature: signature, fieldName: "cgst", newHeaderText: "Output CGST@9%", store });
+  const afterEdit = await resolveColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "cgst", candidateIndices: [2, 3, 4, 5], allColumnIndices: [0, 1, 2, 3, 4, 5], store });
+  pass(afterEdit.status === "resolved_from_memory" && afterEdit.fieldIndex === 4, 'hand-edited cgst mapping now resolves to the NEW header\'s column (index 4, "Output CGST@9%")');
+
+  const gstinStillFine = await resolveColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "gstin", candidateIndices: [0], allColumnIndices: [0, 1, 2, 3, 4, 5], store });
+  pass(gstinStillFine.status === "resolved_from_memory" && gstinStillFine.fieldIndex === 0, "editing cgst left gstin's own mapping untouched (same record, different key in the blob)");
+
+  // Clearing ONE field out of a multi-field blob must not delete the whole record.
+  const clearResult = await updateStoredColumnField({ clientId: CLIENT_ID, structuralSignature: signature, fieldName: "cgst", newHeaderText: null, store });
+  pass(clearResult.deleted === false, "clearing one field out of a multi-field blob does NOT delete the whole record");
+  const cgstAfterClear = await resolveColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "cgst", candidateIndices: [2, 3, 4, 5], allColumnIndices: [0, 1, 2, 3, 4, 5], store });
+  pass(cgstAfterClear.status === "needs_input", "cleared field now needs input again, exactly as if it had never been answered");
+  const gstinAfterCgstClear = await resolveColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "gstin", candidateIndices: [0], allColumnIndices: [0, 1, 2, 3, 4, 5], store });
+  pass(gstinAfterCgstClear.status === "resolved_from_memory", "gstin is still remembered after clearing the unrelated cgst field");
+
+  // Clearing the LAST field in the blob deletes the whole record -- no orphan empty-blob row left behind.
+  const clearLast = await updateStoredColumnField({ clientId: CLIENT_ID, structuralSignature: signature, fieldName: "gstin", newHeaderText: null, store });
+  pass(clearLast.deleted === true, "clearing the last remaining field deletes the whole record");
+  const recordsAfterClearAll = await store.list(CLIENT_ID);
+  pass(recordsAfterClearAll.length === 0, "no record left on file for this signature after the blob emptied out");
+
+  // forgetColumnMemoryRecord() as the "reset all for this shape" bulk action.
+  await rememberColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "gstin", chosenColumnIndex: 0, store });
+  await rememberColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "cgst", chosenColumnIndex: 5, store });
+  const forgotten = await forgetColumnMemoryRecord({ clientId: CLIENT_ID, structuralSignature: signature, store });
+  pass(forgotten === true, "forgetColumnMemoryRecord() removes the whole record in one call");
+  const needsInputAgain = await resolveColumnField({ clientId: CLIENT_ID, sheetName: "Books", sheetSignals, fieldName: "gstin", candidateIndices: [0], allColumnIndices: [0, 1, 2, 3, 4, 5], store });
+  pass(needsInputAgain.status === "needs_input", "after a full reset, every field on this shape needs input again");
+
+  console.log("");
+}
+
 async function run() {
   await runNoStoredRecord();
   await runRememberThenResolve();
   await runResolvesAcrossSecondStructurallyIdenticalSheet();
   await runShapeDriftFuzzyMatch();
   await runTwoFieldsDontOverwrite();
+  await runReviewPanelEditAndReset();
 
   if (failures > 0) {
     console.log(`${failures} check(s) FAILED.`);

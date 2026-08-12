@@ -36,7 +36,7 @@ const { readWorkbookSheets } = require("./xlsx-test-helper.js");
 const { extractSheetSignals, extractWorkbookSignals } = require("./signal-extractor.js");
 const { classifySheet, classifyWorkbook } = require("./classifier.js");
 const { JsonFileSheetMemoryStore } = require("./sheet-memory-store.js");
-const { resolveSheetLabel, rememberSheetLabel } = require("./sheet-memory.js");
+const { resolveSheetLabel, rememberSheetLabel, updateStoredSheetLabel, forgetSheetLabel } = require("./sheet-memory.js");
 const { computeStructuralSignature, tagSequenceSimilarity, headerSequenceSimilarity } = require("./structural-signature.js");
 
 const DEMO_FILE = path.join(__dirname, "..", "demo-data", "Three_Sisters_Kitchen_MENTOR_Demo.xlsx");
@@ -304,10 +304,40 @@ async function runCrossTypeCollisionInvestigation() {
   console.log("");
 }
 
+async function runReviewPanelEditAndReset() {
+  console.log("-- Review panel: updateStoredSheetLabel() corrects a label in place, forgetSheetLabel() clears it --\n");
+  const store = new JsonFileSheetMemoryStore({ filePath: null });
+  const clientId = "workbook:review-panel-test.xlsx";
+  // The real incident this feature exists for: a GST pivot table wrongly
+  // labeled "Journal entries" (see the "PT 2A" mislabel report).
+  const sheetSignals = extractSheetSignals("PT 2A", [
+    ["GSTIN", "Taxable Value", "CGST", "SGST", "IGST"],
+    ["29AAAPL2356Q1Z8", 10000, 900, 900, 0],
+  ]);
+  const { signature } = computeStructuralSignature(sheetSignals);
+
+  await rememberSheetLabel({ clientId, sheetName: "PT 2A", sheetSignals, userProvidedLabel: "Journal entries", store });
+
+  const updated = await updateStoredSheetLabel({ clientId, structuralSignature: signature, newLabel: "GST purchase register", store });
+  assert(updated && updated.user_provided_label === "GST purchase register", "updateStoredSheetLabel() overwrites the stored label in place");
+
+  const resolvedAfterEdit = await resolveSheetLabel({ clientId, sheetName: "PT 2A", sheetSignals, classification: { type: "unknown" }, store });
+  assert(resolvedAfterEdit.status === "remembered" && resolvedAfterEdit.label === "GST purchase register", "the CORRECTED label is what the next scan resolves, not the original wrong one");
+
+  const forgotten = await forgetSheetLabel({ clientId, structuralSignature: signature, store });
+  assert(forgotten === true, "forgetSheetLabel() removes the record");
+
+  const resolvedAfterForget = await resolveSheetLabel({ clientId, sheetName: "PT 2A", sheetSignals, classification: { type: "unknown" }, store });
+  assert(resolvedAfterForget.status === "needs_input", "after forgetting, the next scan asks again instead of reusing anything stale");
+
+  console.log("");
+}
+
 async function run() {
   await runSyntheticScenarios();
   await runRealDemoDataFlow();
   await runCrossTypeCollisionInvestigation();
+  await runReviewPanelEditAndReset();
 
   if (findings.length > 0) {
     console.log(`\n${findings.length} note(s) from the cross-type collision investigation (see FINDING lines above).`);

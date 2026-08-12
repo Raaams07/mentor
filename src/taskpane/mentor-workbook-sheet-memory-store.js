@@ -137,6 +137,16 @@ class WorkbookSheetMemoryStore extends BaseSheetMemoryStore {
     await this._refreshFromExcel();
     return super.list(clientId);
   }
+
+  async forget(clientId, structuralSignature) {
+    await this._refreshFromExcel();
+    return super.forget(clientId, structuralSignature);
+  }
+
+  async updateLabel(clientId, structuralSignature, newLabel) {
+    await this._refreshFromExcel();
+    return super.updateLabel(clientId, structuralSignature, newLabel);
+  }
 }
 
 if (typeof module !== "undefined" && module.exports) {

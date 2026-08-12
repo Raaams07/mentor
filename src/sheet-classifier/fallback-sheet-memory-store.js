@@ -66,6 +66,45 @@ class FallbackSheetMemoryStore {
     primaryList.forEach((r) => bySignature.set(r.structural_signature, r)); // primary wins on overlap
     return [...bySignature.values()];
   }
+
+  // Same "write both, primary authoritative, one side failing doesn't stop
+  // the other" shape as remember() above — a Reset/Edit made via the review
+  // UI should stick even if the secondary (localStorage) write hiccups.
+  async forget(clientId, structuralSignature) {
+    let primaryResult = false;
+    let primaryError = null;
+    try {
+      primaryResult = await this.primary.forget(clientId, structuralSignature);
+    } catch (err) {
+      primaryError = err;
+      console.error("MENTOR memory: primary (workbook) store forget() FAILED", err);
+    }
+    try {
+      await this.secondary.forget(clientId, structuralSignature);
+    } catch (err) {
+      console.error("MENTOR memory: secondary store forget() failed", err);
+    }
+    if (!primaryResult && primaryError) throw primaryError;
+    return primaryResult;
+  }
+
+  async updateLabel(clientId, structuralSignature, newLabel) {
+    let primaryResult = null;
+    let primaryError = null;
+    try {
+      primaryResult = await this.primary.updateLabel(clientId, structuralSignature, newLabel);
+    } catch (err) {
+      primaryError = err;
+      console.error("MENTOR memory: primary (workbook) store updateLabel() FAILED", err);
+    }
+    try {
+      await this.secondary.updateLabel(clientId, structuralSignature, newLabel);
+    } catch (err) {
+      console.error("MENTOR memory: secondary store updateLabel() failed", err);
+    }
+    if (!primaryResult && primaryError) throw primaryError;
+    return primaryResult;
+  }
 }
 
 if (typeof module !== "undefined" && module.exports) {
