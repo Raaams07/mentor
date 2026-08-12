@@ -37,6 +37,7 @@
 const { extractSheetSignals } = require("../sheet-classifier/signal-extractor.js");
 const { classifySheet } = require("../sheet-classifier/classifier.js");
 const { resolveSheetLabel, rememberSheetLabel } = require("../sheet-classifier/sheet-memory.js");
+const { checkLabelPlausibility } = require("../sheet-classifier/sheet-label-plausibility.js");
 const { BrowserSheetMemoryStore } = require("../sheet-classifier/browser-sheet-memory-store.js");
 const { FallbackSheetMemoryStore } = require("../sheet-classifier/fallback-sheet-memory-store.js");
 const { WorkbookSheetMemoryStore, SHEET_NAME: MENTOR_SHEET_MEMORY_SHEET_NAME } = require("./mentor-workbook-sheet-memory-store.js");
@@ -46,6 +47,7 @@ let mentorSheetMemoryLogAction = null; // injected — updates the in-memory his
 let mentorSheetMemoryAppendAuditLogRow = null; // injected — the actual durable write to the "MENTOR Audit Log" sheet
 let mentorSheetMemoryQueue = [];
 let mentorPendingSheetMemoryPrompt = null;
+let mentorPendingMismatchLabel = null; // holds the typed value while the "doesn't match the headers, save anyway?" warning is showing
 const mentorDismissedSheetMemoryThisSession = new Set();
 
 const MENTOR_OWNED_SHEET_NAMES = new Set(["MENTOR Audit Log", MENTOR_SHEET_MEMORY_SHEET_NAME]);
@@ -136,25 +138,22 @@ async function mentorScanForUnknownSheets() {
   }
 }
 
-function mentorShowNextSheetMemoryPrompt() {
+// prefillValue: set only when redisplaying the input after the user chose
+// "Let me edit it" off the mismatch warning — reinserts what they typed
+// rather than making them retype it from scratch.
+function mentorRenderSheetMemoryInputPrompt(prefillValue) {
   const container = document.getElementById("mentor-sheet-memory-prompt");
   if (!container) return;
 
-  if (mentorSheetMemoryQueue.length === 0) {
-    mentorPendingSheetMemoryPrompt = null;
-    container.style.display = "none";
-    container.innerHTML = "";
-    return;
-  }
-
-  mentorPendingSheetMemoryPrompt = mentorSheetMemoryQueue.shift();
   const accent = "#9b59d0"; // distinct from the blue P&L-suggestion accent — reads as a different kind of card
+  const prefill = prefillValue ? mentorEscapeHtml(prefillValue) : "";
 
   let html = "<div style='background:#1a1a2e;border-left:4px solid " + accent + ";padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:#fff;'>";
   html += "<div style='margin-bottom:6px;'>" + mentorEscapeHtml(mentorPendingSheetMemoryPrompt.prompt) + "</div>";
   html +=
-    "<input id='mentor-sheet-memory-input' type='text' placeholder=\"e.g. 'Stock levels', 'Marketing spend log'\" " +
-    "style='width:100%;box-sizing:border-box;padding:5px 7px;border-radius:4px;border:1px solid #444;background:#22252b;color:#fff;font-size:12px;margin-bottom:6px;' " +
+    "<input id='mentor-sheet-memory-input' type='text' placeholder=\"e.g. 'Stock levels', 'Marketing spend log'\" value=\"" +
+    prefill +
+    "\" style='width:100%;box-sizing:border-box;padding:5px 7px;border-radius:4px;border:1px solid #444;background:#22252b;color:#fff;font-size:12px;margin-bottom:6px;' " +
     "onkeydown='if(event.key===\"Enter\"){mentorSubmitSheetMemoryAnswer();}' />";
   html += "<div>";
   html += "<button onclick='mentorSubmitSheetMemoryAnswer()' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Save</button>";
@@ -165,7 +164,53 @@ function mentorShowNextSheetMemoryPrompt() {
   container.style.display = "block";
 
   const input = document.getElementById("mentor-sheet-memory-input");
-  if (input) input.focus();
+  if (input) {
+    input.focus();
+    if (prefillValue) input.select();
+  }
+}
+
+// Renders a "this doesn't match the sheet's actual columns, save anyway?"
+// warning in place of the input — shown instead of saving immediately
+// when checkLabelPlausibility() finds zero shared vocabulary between the
+// typed label and the sheet's headers.
+function mentorRenderSheetMemoryMismatchWarning(value, plausibility) {
+  const container = document.getElementById("mentor-sheet-memory-prompt");
+  if (!container) return;
+
+  const headerList = plausibility.headerLabels.length ? plausibility.headerLabels.map((h) => mentorEscapeHtml(String(h))).join(", ") : "(no header row detected)";
+
+  let html = "<div style='background:#1a1a2e;border-left:4px solid #e67e22;padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:#fff;'>";
+  html +=
+    "<div style='margin-bottom:6px;'>⚠️ \"" +
+    mentorEscapeHtml(value) +
+    "\" doesn't share any words with this sheet's actual columns — <b>" +
+    headerList +
+    "</b>. Sure that's right?</div>";
+  html += "<div>";
+  html += "<button onclick='mentorConfirmSheetMemoryMismatch()' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Save anyway</button>";
+  html += "<button onclick='mentorEditSheetMemoryMismatch()' style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Let me edit it</button>";
+  html += "</div></div>";
+
+  container.innerHTML = html;
+  container.style.display = "block";
+}
+
+function mentorShowNextSheetMemoryPrompt() {
+  const container = document.getElementById("mentor-sheet-memory-prompt");
+  if (!container) return;
+
+  mentorPendingMismatchLabel = null;
+
+  if (mentorSheetMemoryQueue.length === 0) {
+    mentorPendingSheetMemoryPrompt = null;
+    container.style.display = "none";
+    container.innerHTML = "";
+    return;
+  }
+
+  mentorPendingSheetMemoryPrompt = mentorSheetMemoryQueue.shift();
+  mentorRenderSheetMemoryInputPrompt(null);
 }
 
 window.mentorSubmitSheetMemoryAnswer = async function () {
@@ -177,6 +222,30 @@ window.mentorSubmitSheetMemoryAnswer = async function () {
     return;
   }
 
+  const plausibility = checkLabelPlausibility({ label: value, sheetSignals: mentorPendingSheetMemoryPrompt.sheetSignals });
+  if (!plausibility.plausible) {
+    console.log("MENTOR sheet-memory: typed label doesn't share vocabulary with the sheet's headers — asking for confirmation before saving", { value, headers: plausibility.headerLabels });
+    mentorPendingMismatchLabel = value;
+    mentorRenderSheetMemoryMismatchWarning(value, plausibility);
+    return;
+  }
+
+  await mentorPersistSheetMemoryAnswer(value);
+};
+
+window.mentorConfirmSheetMemoryMismatch = async function () {
+  if (!mentorPendingSheetMemoryPrompt || !mentorPendingMismatchLabel) return;
+  await mentorPersistSheetMemoryAnswer(mentorPendingMismatchLabel);
+};
+
+window.mentorEditSheetMemoryMismatch = function () {
+  if (!mentorPendingSheetMemoryPrompt) return;
+  const value = mentorPendingMismatchLabel;
+  mentorPendingMismatchLabel = null;
+  mentorRenderSheetMemoryInputPrompt(value);
+};
+
+async function mentorPersistSheetMemoryAnswer(value) {
   const { clientId, sheetName, sheetSignals } = mentorPendingSheetMemoryPrompt;
   try {
     console.log("MENTOR sheet-memory: submitting answer", { clientId, sheetName, value });
@@ -207,7 +276,7 @@ window.mentorSubmitSheetMemoryAnswer = async function () {
   }
 
   mentorShowNextSheetMemoryPrompt();
-};
+}
 
 window.mentorSkipSheetMemoryPrompt = function () {
   if (!mentorPendingSheetMemoryPrompt) return;
@@ -215,6 +284,34 @@ window.mentorSkipSheetMemoryPrompt = function () {
   mentorShowNextSheetMemoryPrompt();
 };
 
+// Exposed so the "review learned answers" panel (mentor-memory-review-
+// ui.js) writes to the SAME Audit Log entry point every other memory write
+// in this file uses, instead of duplicating the injected-callback dance.
+// A no-op (logged, not thrown) if mentorSheetMemoryInit hasn't run yet.
+async function mentorSheetMemoryWriteAuditLog(sheetName, description) {
+  if (!mentorSheetMemoryAppendAuditLogRow) {
+    console.error("MENTOR sheet-memory: mentorSheetMemoryAppendAuditLogRow was never injected — mentorSheetMemoryInit may not have run correctly");
+    if (mentorSheetMemoryLogAction) mentorSheetMemoryLogAction(description);
+    return;
+  }
+  try {
+    await Excel.run(async (context) => {
+      await mentorSheetMemoryAppendAuditLogRow(context, sheetName, "(whole sheet)", description);
+    });
+    if (mentorSheetMemoryLogAction) mentorSheetMemoryLogAction(description);
+  } catch (writeError) {
+    console.error("MENTOR sheet-memory: failed to write Audit Log row", writeError);
+    if (mentorSheetMemoryLogAction) mentorSheetMemoryLogAction(description + " (Audit Log write failed: " + writeError.message + ")");
+  }
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { mentorSheetMemoryInit, mentorScanForUnknownSheets, MENTOR_OWNED_SHEET_NAMES };
+  module.exports = {
+    mentorSheetMemoryInit,
+    mentorScanForUnknownSheets,
+    MENTOR_OWNED_SHEET_NAMES,
+    mentorSheetMemoryStore,
+    mentorGetSheetMemoryClientId,
+    mentorSheetMemoryWriteAuditLog,
+  };
 }
