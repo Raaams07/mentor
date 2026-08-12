@@ -62,7 +62,11 @@ const HEADER_RULES = {
     const mentionsTaxOrGst = words.includes("tax") || words.includes("gst");
     return mentionsStateOrUt && mentionsTaxOrGst;
   },
-  invoiceNumber: (h) => containsPhrase(h, "invoice") && (containsWord(h, "no") || containsWord(h, "number") || containsWord(h, "num")),
+  // "Invoice details" is the GSTR-2A government portal's own actual column
+  // header for the invoice number (confirmed against a real portal export)
+  // — recognized as its own phrase, since it doesn't carry a "no"/"number"
+  // suffix the way "Invoice No."/"Invoice Number" do.
+  invoiceNumber: (h) => (containsPhrase(h, "invoice") && (containsWord(h, "no") || containsWord(h, "number") || containsWord(h, "num"))) || containsPhrase(h, "invoice details"),
   // Requires a number/no suffix for the same reason invoiceNumber does —
   // real Tally-style purchase registers commonly have BOTH "Voucher Type"
   // (a category like "Purchase"/"Payment"/"Journal", appearing first) and
@@ -78,6 +82,10 @@ const HEADER_RULES = {
   // government-return-only field rcm-detector.js trusts as its primary
   // signal, per Section 9(3)/9(4) CGST Act and Section 5(3) IGST Act.
   reverseCharge: (h) => containsPhrase(h, "reverse charge") || containsWord(h, "rcm"),
+  // GST rate applied to the line (e.g. "Rate (%)", "GST Rate") — not used
+  // by any Step 1/2 rule directly, only by the rate-vs-tax-amount sanity
+  // check backstop (rate-mismatch-detector.js).
+  rate: (h) => containsWord(h, "rate"),
 };
 
 // Most non-blank cells in the column need to look like GSTINs, not all —
@@ -121,7 +129,30 @@ function identifyGstColumns(sheetSignals, values, headerRowIndex) {
     invoiceType: null,
     filingPeriod: null,
     reverseCharge: null,
+    rate: null,
     dateColumns: [],
+    // Additive alongside the single-best-guess fields above — every column
+    // index that plausibly matches each field, not just the first. Used
+    // only by the post-role-recognition ambiguity check
+    // (gst-column-ambiguity-rules.js), never by role recognition itself,
+    // so the fields above keep their existing first-match-wins meaning
+    // completely unchanged.
+    candidates: {
+      taxableValue: [],
+      igst: [],
+      cgst: [],
+      sgst: [],
+      rate: [],
+      invoiceNumber: [],
+      voucherNumber: [],
+      particulars: [],
+      tradeLegalName: [],
+      placeOfSupply: [],
+      invoiceType: [],
+      filingPeriod: [],
+      reverseCharge: [],
+      gstin: [],
+    },
   };
 
   let bestGstinIdx = -1;
@@ -134,23 +165,43 @@ function identifyGstColumns(sheetSignals, values, headerRowIndex) {
   }
   if (bestGstinIdx !== -1) result.gstin = bestGstinIdx;
 
+  result.candidates.gstin = gstinRatios
+    .map((ratio, index) => ({ index, ratio }))
+    .filter((c) => c.ratio >= GSTIN_CONTENT_THRESHOLD)
+    .sort((a, b) => b.ratio - a.ratio);
+
+  // [fieldName, requiresNumericColumn] — same predicate, same order, same
+  // numeric gate as the explicit if-chain this replaces, so result.field
+  // is still set on the first matching column exactly as before. The ONLY
+  // behavior addition is also recording every match into
+  // result.candidates.field.
+  const fieldRules = [
+    ["taxableValue", true],
+    ["igst", true],
+    ["cgst", true],
+    ["sgst", true],
+    ["rate", true],
+    ["invoiceNumber", false],
+    ["voucherNumber", false],
+    ["particulars", false],
+    ["tradeLegalName", false],
+    ["placeOfSupply", false],
+    ["invoiceType", false],
+    ["filingPeriod", false],
+    ["reverseCharge", false],
+  ];
+
   for (let c = 0; c < columns.length; c++) {
     const col = columns[c];
     const header = normalizeHeaderText(col.header);
     if (!header) continue;
 
-    if (result.taxableValue === null && HEADER_RULES.taxableValue(header) && isNumericColumn(col)) result.taxableValue = c;
-    if (result.igst === null && HEADER_RULES.igst(header) && isNumericColumn(col)) result.igst = c;
-    if (result.cgst === null && HEADER_RULES.cgst(header) && isNumericColumn(col)) result.cgst = c;
-    if (result.sgst === null && HEADER_RULES.sgst(header) && isNumericColumn(col)) result.sgst = c;
-    if (result.invoiceNumber === null && HEADER_RULES.invoiceNumber(header)) result.invoiceNumber = c;
-    if (result.voucherNumber === null && HEADER_RULES.voucherNumber(header)) result.voucherNumber = c;
-    if (result.particulars === null && HEADER_RULES.particulars(header)) result.particulars = c;
-    if (result.tradeLegalName === null && HEADER_RULES.tradeLegalName(header)) result.tradeLegalName = c;
-    if (result.placeOfSupply === null && HEADER_RULES.placeOfSupply(header)) result.placeOfSupply = c;
-    if (result.invoiceType === null && HEADER_RULES.invoiceType(header)) result.invoiceType = c;
-    if (result.filingPeriod === null && HEADER_RULES.filingPeriod(header)) result.filingPeriod = c;
-    if (result.reverseCharge === null && HEADER_RULES.reverseCharge(header)) result.reverseCharge = c;
+    for (const [field, requiresNumericColumn] of fieldRules) {
+      if (HEADER_RULES[field](header) && (!requiresNumericColumn || isNumericColumn(col))) {
+        result.candidates[field].push(c);
+        if (result[field] === null) result[field] = c;
+      }
+    }
 
     if (isDateColumn(col)) result.dateColumns.push(c);
   }

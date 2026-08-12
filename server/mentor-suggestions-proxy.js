@@ -30,6 +30,13 @@ const fs = require("fs");
 const path = require("path");
 const { screenVendorsForIneligibleItc, callAnthropicApi } = require("./anthropic-vendor-itc-screening.js");
 const { mockScreenVendors } = require("./mock-vendor-itc-screening.js");
+const { ColumnPatternStore } = require("./column-pattern-store.js");
+const { normalizeCandidateHeaders } = require("../src/gst-reconciliation/column-pattern-key.js");
+const { normalizeHeaderText } = require("../src/sheet-classifier/structural-signature.js");
+
+// Tier 1 (shared software-pattern) column-resolution memory — see
+// column-pattern-store.js. Default path: server/data/column-pattern-memory.json.
+const columnPatternStore = new ColumnPatternStore();
 
 const PORT = process.env.MENTOR_PROXY_PORT ? parseInt(process.env.MENTOR_PROXY_PORT, 10) : 3001;
 const FORCE_MOCK = process.env.MENTOR_MOCK_LLM === "1";
@@ -79,6 +86,22 @@ function validateVendors(vendors) {
   return null;
 }
 
+function validateColumnPatternLookupBody(body) {
+  if (!body || typeof body.fieldName !== "string" || !body.fieldName.trim()) return "`fieldName` must be a non-empty string";
+  if (!Array.isArray(body.candidateHeaders) || body.candidateHeaders.length < 2) return "`candidateHeaders` must be an array with at least 2 entries";
+  if (body.candidateHeaders.some((h) => typeof h !== "string")) return "`candidateHeaders` must be an array of strings";
+  return null;
+}
+
+function validateColumnPatternRememberBody(body) {
+  const baseError = validateColumnPatternLookupBody(body);
+  if (baseError) return baseError;
+  if (typeof body.chosenHeader !== "string" || !body.chosenHeader.trim()) return "`chosenHeader` must be a non-empty string";
+  const normalizedCandidates = normalizeCandidateHeaders(body.candidateHeaders);
+  if (!normalizedCandidates.includes(normalizeHeaderText(body.chosenHeader))) return "`chosenHeader` must be one of `candidateHeaders`";
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
 
@@ -92,6 +115,41 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && req.url === "/health") {
     sendJson(res, 200, { status: "ok", mode: MOCK_MODE ? "mock" : "live" }, origin);
+    return;
+  }
+
+  // Tier 1 (shared software-pattern) column-resolution memory — see
+  // column-pattern-store.js. Independent of the LLM vendor-suggestions
+  // endpoint below; no request body here ever carries client data (no
+  // sample values, GSTINs, amounts, sheet names, or client identifiers —
+  // only field name + column header text).
+  if (req.method === "POST" && req.url === "/api/column-pattern-memory/lookup") {
+    try {
+      const parsedBody = JSON.parse(await readRequestBody(req));
+      const validationError = validateColumnPatternLookupBody(parsedBody);
+      if (validationError) {
+        sendJson(res, 400, { error: validationError }, origin);
+        return;
+      }
+      sendJson(res, 200, columnPatternStore.lookup(parsedBody.fieldName, parsedBody.candidateHeaders), origin);
+    } catch (error) {
+      sendJson(res, 400, { error: "request body is not valid JSON" }, origin);
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/column-pattern-memory/remember") {
+    try {
+      const parsedBody = JSON.parse(await readRequestBody(req));
+      const validationError = validateColumnPatternRememberBody(parsedBody);
+      if (validationError) {
+        sendJson(res, 400, { error: validationError }, origin);
+        return;
+      }
+      sendJson(res, 200, columnPatternStore.remember(parsedBody.fieldName, parsedBody.candidateHeaders, parsedBody.chosenHeader), origin);
+    } catch (error) {
+      sendJson(res, 400, { error: "request body is not valid JSON" }, origin);
+    }
     return;
   }
 
