@@ -143,6 +143,23 @@ function runTests() {
   const twoACluster = clusters.find((c) => c.rowIndex === 24);
   assert(twoACluster && twoACluster.rowSpan === 1 && twoACluster.amount === 0, "a lone 1-member cluster is still represented (rowSpan 1), with zero over-claim (sum equals the max when there's only one member)");
   assert(clusters.some((c) => c.reason.includes("2A")) && clusters.some((c) => c.reason.includes("Books")), "reasons correctly distinguish which source sheet each cluster came from");
+  assert(clusters.every((c) => c.category === "Duplicate Invoices"), "default call (no options, matching every pre-existing caller) tags every cluster as confirmed -- category unaffected by the new options param unless explicitly passed");
+
+  console.log("\n-- Duplicate Invoices: the new confirmed/possible split (read-back of the sheet's SECOND section) --\n");
+
+  // Mirrors how readGstTopIssuesFromExistingSheets now calls this function
+  // TWICE — once per section, each with homogeneous confirmed-ness, since
+  // the CALLER already knows which section it's reading (the row itself
+  // still carries its own Match Reason for point-and-explain, but this
+  // function no longer needs to inspect it to decide the category).
+  const possibleDataRows = [
+    { row: ["2A", 1, "27AAACN2082N1Z8", 309, "30079601851681", 42.37, 7.63, 0, 0, "same_amount", 0], absoluteIndex: 40 },
+    { row: ["2A", 1, "27AAACN2082N1Z8", 310, "30079601851692", 42.37, 7.63, 0, 0, "same_amount", 0], absoluteIndex: 41 },
+  ];
+  const possibleClusters = topIssuesFromDuplicateDataRows(possibleDataRows, { confirmed: false });
+  assert(possibleClusters.length === 1, "the NSDL-style same_amount-only pair still groups into one cluster");
+  assert(possibleClusters[0].category === "Possible Duplicate Invoices", "confirmed:false tags the cluster as 'Possible Duplicate Invoices', not 'Duplicate Invoices' -- never read back with the same category/confidence as a confirmed match");
+  assert(possibleClusters[0].reason.startsWith("POSSIBLE duplicate (not confirmed) —"), "reason text explicitly says this wasn't confirmed, so it can't be mistaken for a real duplicate when re-read into a future session's Top Issues list");
 
   console.log("\n-- isDataRow: distinguishing real data from marker/blank/explanation rows --\n");
 

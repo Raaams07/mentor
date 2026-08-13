@@ -1,5 +1,7 @@
 /* global Excel */
 
+const { isConfirmedDuplicateMatch } = require("../gst-reconciliation/duplicate-invoice-detector.js");
+
 /*
  * gst-report-writer.js
  * -----------------------
@@ -768,22 +770,30 @@ async function writeIneligibleItcSheet(context, itcBySource, materialityThreshol
    Step 2: Duplicate Invoices (combined across both recognized sheets)
    ============================================================ */
 
+const DUPLICATE_HEADERS = ["Source Sheet", "Cluster #", "GSTIN", "Row", "Identifier", "Taxable Value", "IGST", "CGST", "SGST", "Match Reason", "Date Spread (days)"];
+const DUPLICATE_RUPEE_COLUMNS = [5, 6, 7, 8]; // Taxable Value, IGST, CGST, SGST — NOT Cluster # (1) or Row (3, a row reference), and NOT Date Spread (days) (10, a day count, not rupees)
+// Same "cluster of members beyond the first is the over-claim" math used
+// both to size/rank a cluster in Top Issues and (for confirmed clusters
+// only) in sumDuplicateOverclaim() below.
+const POSSIBLE_DUPLICATE_MARKER = "Possible duplicates (same amount only — NOT a confirmed match)";
+
 function duplicateInvoiceRow(source, clusterIdx, cluster, m, amounts) {
   return [source.sheetName, clusterIdx + 1, cluster.gstin, toAbsoluteExcelRow(source.headerRowIndex, m.rowIndex), m.identifier, amounts.taxableValue, amounts.igst, amounts.cgst, amounts.sgst, cluster.matchReason, cluster.dateSpreadDays];
 }
 
-async function writeDuplicateInvoicesSheet(context, dupBySource) {
-  const headers = ["Source Sheet", "Cluster #", "GSTIN", "Row", "Identifier", "Taxable Value", "IGST", "CGST", "SGST", "Match Reason", "Date Spread (days)"];
-  const rupeeColumns = [5, 6, 7, 8]; // Taxable Value, IGST, CGST, SGST — NOT Cluster # (1) or Row (3, a row reference), and NOT Date Spread (days) (10, a day count, not rupees)
-  const explanation = [
-    "Rows across both recognized sheets that look like the same invoice entered more than once: same GSTIN, and either the same invoice/voucher number (within 45 days, with matching taxable value/tax rate) or the same amount alone (within a tight 3-day window, excluding cases that look like a routine recurring charge or genuinely consecutive invoicing) — see duplicate-invoice-detector.js for the full rules.",
-    "Each numbered cluster groups every row believed to be the same duplicated invoice.",
-    "The Summary sheet subtracts the DUPLICATE sheet's over-claimed portion (every cluster member beyond the first) from the net provisionally-eligible figure — the '2A' sheet's own duplicates are shown here for review but not subtracted, since a duplicate filing by the supplier doesn't by itself mean the taxpayer over-claimed.",
-    "Not auto-applied — confirm each cluster is genuinely a duplicate (not two separate, coincidentally similar invoices) before removing anything.",
-  ];
+function clusterOverclaimAmount(memberTaxTotals) {
+  return roundTo2(memberTaxTotals.reduce((a, b) => a + b, 0) - Math.max(...memberTaxTotals));
+}
 
+// isConfirmed: true builds the CONFIRMED section (every cluster member
+// shares an identical invoice/voucher number — see
+// isConfirmedDuplicateMatch()); false builds the POSSIBLE section (the
+// same_amount-only signal, kept deliberately separate — see this file's
+// require() of isConfirmedDuplicateMatch and duplicate-invoice-detector.js's
+// own docstring for why these are NOT presented with equal confidence).
+function buildDuplicateSectionRows(dupBySource, isConfirmed) {
   const rows = [];
-  const itemMeta = []; // one entry per CLUSTER (not per member row) — a cluster is the reviewable unit here
+  const itemMeta = [];
   let anyApplicable = false;
   const notApplicableReasons = [];
   for (const source of dupBySource) {
@@ -792,7 +802,8 @@ async function writeDuplicateInvoicesSheet(context, dupBySource) {
       continue;
     }
     anyApplicable = true;
-    source.result.clusters.forEach((cluster, clusterIdx) => {
+    const clusters = source.result.clusters.filter((c) => isConfirmedDuplicateMatch(c.matchReason) === isConfirmed);
+    clusters.forEach((cluster, clusterIdx) => {
       const rowSpanStart = rows.length; // cluster members are pushed contiguously below, so this is a stable span start
       const memberTaxTotals = [];
       for (const m of cluster.members) {
@@ -800,26 +811,62 @@ async function writeDuplicateInvoicesSheet(context, dupBySource) {
         memberTaxTotals.push(amounts.totalTax);
         rows.push(duplicateInvoiceRow(source, clusterIdx, cluster, m, amounts));
       }
-      // Same "every occurrence beyond the single legitimate one" over-claim
-      // math as sumDuplicateOverclaim() below — used here just to size/rank
-      // the issue, not to double-subtract anything from the Summary sheet.
-      const overclaim = memberTaxTotals.reduce((a, b) => a + b, 0) - Math.max(...memberTaxTotals);
       itemMeta.push({
         rowSpanStart,
         rowSpan: cluster.members.length,
-        amount: roundTo2(overclaim),
+        amount: clusterOverclaimAmount(memberTaxTotals),
         reason:
-          "Cluster of " + cluster.members.length + " entries, matched on " + cluster.matchReason.replace(/_/g, " ") + " (" + source.sheetName + (source.role === "purchase_register" ? " — reduces claimable ITC" : " — informational, supplier-side" ) + ")",
-        category: "Duplicate Invoices",
+          (isConfirmed ? "" : "POSSIBLE duplicate (not confirmed) — ") +
+          "Cluster of " + cluster.members.length + " entries, matched on " + cluster.matchReason.replace(/_/g, " ") + " (" + source.sheetName + (source.role === "purchase_register" ? " — reduces claimable ITC" : " — informational, supplier-side") + ")",
+        category: isConfirmed ? "Duplicate Invoices" : "Possible Duplicate Invoices",
         tier: 3,
       });
     });
   }
-  if (!anyApplicable) {
-    explanation.push("Not applicable to this workbook: " + (notApplicableReasons.join("; ") || "no GSTIN/date columns identified on either sheet") + ".");
+  return { rows, itemMeta, anyApplicable, notApplicableReasons };
+}
+
+async function writeDuplicateInvoicesSheet(context, dupBySource) {
+  const confirmedExplanation = [
+    "Confirmed duplicates: rows across both recognized sheets sharing the same GSTIN AND the same invoice/voucher number (within 45 days, with matching taxable value/tax rate) — the strongest evidence this check has; see duplicate-invoice-detector.js for the full rule.",
+    "Each numbered cluster groups every row believed to be the same duplicated invoice.",
+    "The Summary sheet subtracts THIS section's over-claimed portion (Books side, every cluster member beyond the first) from the net provisionally-eligible figure — the '2A' sheet's own duplicates are shown here for review but not subtracted, since a duplicate filing by the supplier doesn't by itself mean the taxpayer over-claimed.",
+    "A second, separate section further down this sheet lists a much WEAKER signal (same amount only, no shared invoice number) — kept apart deliberately so it's never mistaken for evidence this strong. See that section's own explanation.",
+    "Not auto-applied — confirm each cluster is genuinely a duplicate (not two separate, coincidentally similar invoices) before removing anything.",
+  ];
+  const confirmed = buildDuplicateSectionRows(dupBySource, true);
+  if (!confirmed.anyApplicable) {
+    confirmedExplanation.push("Not applicable to this workbook: " + (confirmed.notApplicableReasons.join("; ") || "no GSTIN/date columns identified on either sheet") + ".");
   }
-  const result = await writeReportSheet(context, "GST - Duplicate Invoices", explanation, headers, rows, [0, 3], rupeeColumns); // key: Source Sheet + Row (NOT Cluster # — cluster numbering isn't stable across runs)
-  return attachTopIssueCandidates(result, "GST - Duplicate Invoices", itemMeta);
+  const mainResult = await writeReportSheet(context, "GST - Duplicate Invoices", confirmedExplanation, DUPLICATE_HEADERS, confirmed.rows, [0, 3], DUPLICATE_RUPEE_COLUMNS); // key: Source Sheet + Row (NOT Cluster # — cluster numbering isn't stable across runs)
+  const mainSection = attachTopIssueCandidates(mainResult, "GST - Duplicate Invoices", confirmed.itemMeta);
+
+  // Real incident this section exists for: a same_amount-only pair (two
+  // DIFFERENT NSDL e-Governance invoice numbers, coincidentally the same
+  // ₹42.37) was verified against a real expert-completed answer key to be
+  // a genuine "Extra in 2A" item — not a duplicate at all. same_amount
+  // alone is not reliable enough to net into the ITC figure, or to sit in
+  // the same table as a confirmed same-invoice-number match.
+  const possibleExplanation = [
+    "Possible duplicates only — NOT a confirmed match. Rows sharing the same GSTIN and the same amount (within a tight 3-day window), but with DIFFERENT invoice/voucher numbers, or with no invoice/voucher number to compare at all.",
+    "This is a much weaker signal than the confirmed section above: round/common amounts recur naturally and non-suspiciously (routine charges, standard fees). This check already excludes the most obvious false-positive patterns it can detect (a recurring routine amount elsewhere in the file, near-sequential invoice numbering) — but it cannot rule out every legitimate coincidence.",
+    "NOT subtracted anywhere in the Summary sheet, and NOT counted toward the confirmed section's over-claim figure — review each cluster individually before treating it as a real duplicate.",
+  ];
+  const possible = buildDuplicateSectionRows(dupBySource, false);
+  if (!possible.anyApplicable) {
+    possibleExplanation.push("Not applicable to this workbook: " + (possible.notApplicableReasons.join("; ") || "no GSTIN/date columns identified on either sheet") + ".");
+  } else if (possible.rows.length === 0) {
+    possibleExplanation.push("None found on this workbook.");
+  }
+  const possibleResult = await appendReportSectionWithReview(context, "GST - Duplicate Invoices", POSSIBLE_DUPLICATE_MARKER, possibleExplanation, DUPLICATE_HEADERS, possible.rows, [0, 3], DUPLICATE_RUPEE_COLUMNS);
+  const possibleSection = attachTopIssueCandidates(possibleResult, "GST - Duplicate Invoices", possible.itemMeta);
+
+  return {
+    sheet: mainSection.sheet,
+    reappliedCount: mainSection.reappliedCount + possibleSection.reappliedCount,
+    orphanedCount: mainSection.orphanedCount + possibleSection.orphanedCount,
+    topIssueCandidates: mainSection.topIssueCandidates.concat(possibleSection.topIssueCandidates),
+  };
 }
 
 /* ============================================================
@@ -901,7 +948,11 @@ function sumRcmAmount(rcmBySource) {
 }
 
 // Only the Books-side clusters reduce the net figure — see the Duplicate
-// Invoices sheet's explanation block for why.
+// Invoices sheet's explanation block for why. Only CONFIRMED clusters
+// (same invoice/voucher number) are netted — the weaker same-amount-only
+// signal is shown for review in its own section but never subtracted
+// here (see isConfirmedDuplicateMatch's docstring for the real false-
+// positive that motivated keeping it out of this figure).
 function sumDuplicateOverclaim(dupBySource) {
   let amount = 0;
   let clusterCount = 0;
@@ -909,6 +960,7 @@ function sumDuplicateOverclaim(dupBySource) {
   if (!booksSource || !booksSource.result.applicable) return { amount: 0, clusterCount: 0 };
 
   for (const cluster of booksSource.result.clusters) {
+    if (!isConfirmedDuplicateMatch(cluster.matchReason)) continue;
     clusterCount++;
     const taxTotals = cluster.members.map((m) => getRowAmounts(booksSource.values, booksSource.headerRowIndex, booksSource.columns, m.rowIndex).totalTax);
     const sum = taxTotals.reduce((a, b) => a + b, 0);
@@ -1223,9 +1275,12 @@ function explainIneligibleItcRow(row) {
 
 function explainDuplicateRow(row) {
   const clusterNum = row[1], matchReason = row[9], dateSpread = row[10];
+  const confirmed = isConfirmedDuplicateMatch(matchReason);
   return {
-    ruleLabel: "Duplicate Invoices",
-    whichRuleFired: "Cluster #" + clusterNum + " — matched on " + String(matchReason).replace(/_/g, " ") + ", " + dateSpread + " day(s) apart.",
+    ruleLabel: confirmed ? "Duplicate Invoices" : "Possible Duplicate Invoices (NOT confirmed)",
+    whichRuleFired:
+      "Cluster #" + clusterNum + " — matched on " + String(matchReason).replace(/_/g, " ") + ", " + dateSpread + " day(s) apart." +
+      (confirmed ? "" : " This is a WEAKER, amount-only signal (no shared invoice/voucher number) — review carefully before treating it as a real duplicate."),
     legalCitation: "ITC may only be claimed once per genuine invoice (CGST Act Section 16) — confirm this is a real duplicate, not two separate invoices, before removing anything.",
   };
 }
@@ -1391,8 +1446,13 @@ function topIssueFromRateMismatchRow(row) {
 // Duplicate Invoices rows are grouped by cluster, not read one-by-one —
 // mirrors the write-time cluster-as-one-item convention. Clusters are
 // contiguous rows sharing the same (Source Sheet, Cluster #), same as
-// how writeDuplicateInvoicesSheet wrote them.
-function topIssuesFromDuplicateDataRows(dataRows) {
+// how writeDuplicateInvoicesSheet wrote them. options.confirmed (default
+// true) selects which of the sheet's two sections is being read — see
+// writeDuplicateInvoicesSheet/buildDuplicateSectionRows for why confirmed
+// (same invoice/voucher number) and possible (same amount only) duplicates
+// are kept in visibly distinct categories, not blended together.
+function topIssuesFromDuplicateDataRows(dataRows, options) {
+  const confirmed = options && options.confirmed === false ? false : true;
   const clusters = [];
   let current = null;
   for (const { row, absoluteIndex } of dataRows) {
@@ -1411,8 +1471,8 @@ function topIssuesFromDuplicateDataRows(dataRows) {
       rowIndex: c.rowIndex,
       rowSpan: c.rowSpan,
       amount: overclaim,
-      reason: "Cluster of " + c.memberTotals.length + " entries (" + c.sourceSheet + ")",
-      category: "Duplicate Invoices",
+      reason: (confirmed ? "" : "POSSIBLE duplicate (not confirmed) — ") + "Cluster of " + c.memberTotals.length + " entries (" + c.sourceSheet + ")",
+      category: confirmed ? "Duplicate Invoices" : "Possible Duplicate Invoices",
       tier: 3,
     };
   });
@@ -1457,7 +1517,6 @@ const GST_TOP_ISSUE_SHEET_SPECS = [
   { name: "GST - Mismatch", kind: "vendor" },
   { name: "GST - RCM", kind: "rcm" },
   { name: "GST - Ineligible ITC", kind: "ineligibleItc" },
-  { name: "GST - Duplicate Invoices", kind: "duplicates" },
   { name: "GST - Rate Mismatch", kind: "rateMismatch" },
 ];
 
@@ -1503,8 +1562,6 @@ async function readGstTopIssuesFromExistingSheets(context) {
       dataRows.forEach(({ row, absoluteIndex }) => {
         topIssues.push({ sheetName: spec.name, rowIndex: absoluteIndex, rowSpan: 1, ...topIssueFromIneligibleItcRow(row, materialityThreshold) });
       });
-    } else if (spec.kind === "duplicates") {
-      topIssuesFromDuplicateDataRows(dataRows).forEach((c) => topIssues.push({ sheetName: spec.name, ...c }));
     } else if (spec.kind === "rateMismatch") {
       dataRows.forEach(({ row, absoluteIndex }) => {
         topIssues.push({ sheetName: spec.name, rowIndex: absoluteIndex, rowSpan: 1, ...topIssueFromRateMismatchRow(row) });
@@ -1534,6 +1591,47 @@ async function readGstTopIssuesFromExistingSheets(context) {
       for (let r = crossHeaderIdx + 1; r < wrongHeadValues.length; r++) {
         if (isDataRow(wrongHeadValues[r])) topIssues.push({ sheetName: "GST - Wrong Head", rowIndex: r, rowSpan: 1, ...topIssueFromCrossSheetWrongHeadRow(wrongHeadValues[r]) });
       }
+    }
+  }
+
+  // "GST - Duplicate Invoices" also has two stacked sections (see
+  // writeDuplicateInvoicesSheet/POSSIBLE_DUPLICATE_MARKER) — confirmed
+  // (same invoice/voucher number) and possible-only (same amount only,
+  // NOT confirmed). Both sections share the identical header layout, so
+  // (unlike Wrong Head) they can't be told apart by header shape alone —
+  // the marker row is what splits them: the confirmed section's header is
+  // the FIRST "Source Sheet"/"Cluster #" row, the possible section's is
+  // the first such row AFTER the marker.
+  const dupValues = await readSheetUsedValues(context, "GST - Duplicate Invoices");
+  if (dupValues) {
+    let confirmedHeaderIdx = -1;
+    let possibleMarkerIdx = -1;
+    let possibleHeaderIdx = -1;
+    for (let r = 0; r < dupValues.length; r++) {
+      const row = dupValues[r];
+      const looksLikeDuplicateHeader = String(row[0]).trim() === "Source Sheet" && String(row[1]).trim() === "Cluster #";
+      if (confirmedHeaderIdx === -1 && looksLikeDuplicateHeader) {
+        confirmedHeaderIdx = r;
+      } else if (possibleMarkerIdx === -1 && String(row[0]).trim() === POSSIBLE_DUPLICATE_MARKER) {
+        possibleMarkerIdx = r;
+      } else if (possibleMarkerIdx !== -1 && possibleHeaderIdx === -1 && looksLikeDuplicateHeader) {
+        possibleHeaderIdx = r;
+      }
+    }
+    if (confirmedHeaderIdx !== -1) {
+      const sectionEnd = possibleMarkerIdx !== -1 ? possibleMarkerIdx : dupValues.length;
+      const dataRows = [];
+      for (let r = confirmedHeaderIdx + 1; r < sectionEnd; r++) {
+        if (isDataRow(dupValues[r])) dataRows.push({ row: dupValues[r], absoluteIndex: r });
+      }
+      topIssuesFromDuplicateDataRows(dataRows, { confirmed: true }).forEach((c) => topIssues.push({ sheetName: "GST - Duplicate Invoices", ...c }));
+    }
+    if (possibleHeaderIdx !== -1) {
+      const dataRows = [];
+      for (let r = possibleHeaderIdx + 1; r < dupValues.length; r++) {
+        if (isDataRow(dupValues[r])) dataRows.push({ row: dupValues[r], absoluteIndex: r });
+      }
+      topIssuesFromDuplicateDataRows(dataRows, { confirmed: false }).forEach((c) => topIssues.push({ sheetName: "GST - Duplicate Invoices", ...c }));
     }
   }
 

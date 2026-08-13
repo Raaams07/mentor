@@ -8,7 +8,7 @@
  * Run with: node src/gst-reconciliation/duplicate-invoice-detector-test.js
  */
 
-const { findDuplicateInvoices, nearSequentialInvoiceNumbers } = require("./duplicate-invoice-detector.js");
+const { findDuplicateInvoices, nearSequentialInvoiceNumbers, isConfirmedDuplicateMatch } = require("./duplicate-invoice-detector.js");
 
 let failures = 0;
 function assert(condition, description) {
@@ -369,6 +369,20 @@ function runTests() {
 
   const noDate = findDuplicateInvoices([HEADER_ROW, [GSTIN_A, "2026-05-01", "INV-900", 1000]], 0, { ...COLUMNS, dateColumns: [] });
   assert(noDate.applicable === false, "sheet without a date column is correctly reported as not applicable — can't apply a proximity window without dates");
+
+  console.log("");
+
+  console.log("-- isConfirmedDuplicateMatch: confidence classification used to keep same_amount-only flags out of the confirmed table --\n");
+
+  // Real incident this exists for: a same_amount-only pair (two DIFFERENT
+  // NSDL e-Governance invoice numbers, coincidentally both ₹42.37) was
+  // independently confirmed against a real answer-key to be a genuine
+  // "Extra in 2A" item, not a duplicate — same_amount alone must never be
+  // treated with the same confidence as a shared invoice number.
+  assert(isConfirmedDuplicateMatch("same_invoice_number_and_amount") === true, "same_invoice_number_and_amount -> confirmed (the strongest evidence this module produces)");
+  assert(isConfirmedDuplicateMatch("same_invoice_number") === true, "same_invoice_number (amount differed across the cluster, e.g. a multi-rate line split elsewhere) -> still confirmed, since the identifier itself is strong evidence");
+  assert(isConfirmedDuplicateMatch("same_amount") === false, "same_amount (no shared identifier — the NSDL case) -> NOT confirmed");
+  assert(isConfirmedDuplicateMatch("chained") === false, "chained (transitively unioned via at least one amount-only bridging link) -> NOT confirmed");
 
   console.log("");
 }

@@ -298,6 +298,27 @@ function determineReason(members, amountTolerance) {
   return "chained"; // e.g. A matches B on number, B matches C on amount — grouped transitively
 }
 
+// Which matchReason values represent CONFIRMED evidence (every member of
+// the cluster shares an identical invoice/voucher number) vs. a WEAKER
+// signal that relies on amount alone somewhere in the cluster ("same_amount",
+// or "chained", which by construction always includes at least one
+// amount-only bridging link — see determineReason above: a cluster only
+// reaches "chained" when NOT every member shares one identifier AND NOT
+// every member shares one amount, which is only reachable via an
+// amount-only union connecting members with different identifiers).
+//
+// Verified against a real answer-key file: a same_amount-only pair (two
+// DIFFERENT NSDL e-Governance invoice numbers, coincidentally both
+// ₹42.37) was independently confirmed to be a real "Extra in 2A" item,
+// not a duplicate at all — same_amount alone is not reliable enough to
+// present with the same confidence as a shared invoice number. Callers
+// (gst-report-writer.js) use this to keep the two kinds of evidence in
+// separate, differently-labeled sections rather than blending them.
+const CONFIRMED_DUPLICATE_MATCH_REASONS = new Set(["same_invoice_number_and_amount", "same_invoice_number"]);
+function isConfirmedDuplicateMatch(matchReason) {
+  return CONFIRMED_DUPLICATE_MATCH_REASONS.has(matchReason);
+}
+
 // values/headerRowIndex: the sheet's raw data + header position.
 // columns: identifyGstColumns() result for this sheet.
 function findDuplicateInvoices(values, headerRowIndex, columns, options) {
@@ -473,6 +494,8 @@ if (typeof module !== "undefined" && module.exports) {
     nearSequentialInvoiceNumbers,
     computeTypicalGapsBySkeleton,
     normalizeIdentifier,
+    isConfirmedDuplicateMatch,
+    CONFIRMED_DUPLICATE_MATCH_REASONS,
     DEFAULT_IDENTIFIER_WINDOW_DAYS,
     DEFAULT_AMOUNT_ONLY_WINDOW_DAYS,
     DEFAULT_AMOUNT_TOLERANCE,
