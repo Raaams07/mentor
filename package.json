@@ -47,6 +47,7 @@
     "test:ineligible-itc-vendor-extraction": "node src/taskpane/ineligible-itc-vendor-extraction-test.js",
     "test:gst-source-data-hash": "node src/taskpane/gst-source-data-hash-test.js",
     "test:gst-topissue-readback": "node src/taskpane/gst-report-writer-topissue-readback-test.js",
+    "test:gst-row-reference": "node src/taskpane/gst-report-writer-row-reference-test.js",
     "test:gst-suggestions-proxy": "node server/mentor-suggestions-proxy-test.js",
     "gst-suggestions-proxy": "node server/mentor-suggestions-proxy.js",
     "validate": "office-addin-manifest validate manifest.xml",

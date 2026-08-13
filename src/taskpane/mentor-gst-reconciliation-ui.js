@@ -367,6 +367,12 @@ function mentorComputeGstReconciliation(gstr2aSheet, booksSheet) {
   return {
     key: mentorGstWorkbookKey(gstr2aSheet.sheetName, booksSheet.sheetName),
     sheetNames: { gstr2a: gstr2aSheet.sheetName, books: booksSheet.sheetName },
+    // Needed by gst-report-writer.js to convert every detector's ROW-
+    // RELATIVE index into the real Excel row number for the sheets whose
+    // input isn't already a `...bySource` array carrying its own
+    // headerRowIndex (Extra in Books/2A, Possible Matches, Wrong Head).
+    gstr2aHeaderRowIndex: gstr2aInput.headerRowIndex,
+    booksHeaderRowIndex: booksInput.headerRowIndex,
     comparisonSummary,
     invoiceLevelExtrasResult,
     wrongHeadResult,
@@ -827,6 +833,8 @@ window.mentorAcceptGstReconciliation = async function () {
     await Excel.run(async (context) => {
       const result = await writeGstReconciliationReport(context, {
         sheetNames: proposal.sheetNames,
+        gstr2aHeaderRowIndex: proposal.gstr2aHeaderRowIndex,
+        booksHeaderRowIndex: proposal.booksHeaderRowIndex,
         comparisonSummary: proposal.comparisonSummary,
         invoiceLevelExtrasResult: proposal.invoiceLevelExtrasResult,
         wrongHeadResult: proposal.wrongHeadResult,

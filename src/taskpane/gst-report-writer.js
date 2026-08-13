@@ -122,6 +122,29 @@ function getRowAmounts(values, headerRowIndex, columns, rowIndex) {
   return { taxableValue, igst, cgst, sgst, totalTax: roundTo2(igst + cgst + sgst) };
 }
 
+// Converts a detector's ROW-RELATIVE index (0-based, counting from the
+// first data row immediately after the header — the convention every
+// detector in src/gst-reconciliation/*.js uses, e.g. wrong-head-
+// detector.js, duplicate-invoice-detector.js) into the row's real 1-based
+// Excel row number on the SOURCE sheet. Mirrors the same dataRows-slicing
+// logic getRowAmounts() above already uses, so the two stay consistent.
+//
+// Every "Row"/"Row (in X)" column written onto a generated sheet MUST go
+// through this before being displayed — a real incident: this conversion
+// was missing, so every such column silently showed the raw relative
+// index instead. A person manually navigating to "row N" landed on
+// completely unrelated data (confirmed on a real client file: a genuine
+// duplicate-invoice pair was reported as "row 387/390" when the actual
+// matching rows were 395/398 — the printed number was off by
+// headerRowIndex + 2 on that sheet). MENTOR's own click-to-select
+// navigation (attachTopIssueCandidates, elsewhere in this file) was never
+// affected — it already did its own correct conversion — only the raw
+// TEXT printed in the "Row" column was wrong.
+function toAbsoluteExcelRow(headerRowIndex, relativeRowIndex) {
+  const dataStartIndex = headerRowIndex === -1 ? 0 : headerRowIndex + 1;
+  return dataStartIndex + relativeRowIndex + 1;
+}
+
 /* ============================================================
    Generic sheet writer
    ============================================================ */
@@ -372,8 +395,8 @@ function vendorRow(v) {
 
 const EXTRA_INVOICE_RUPEE_COLUMNS = [3, 4, 5, 6]; // Taxable Value, IGST, CGST, SGST — NOT GSTIN/Invoice-Voucher Number (identifiers) or Row (a row reference)
 
-function extraInvoiceRow(r) {
-  return [r.gstin, r.identifier, r.rowIndex, r.taxableValue, r.igst, r.cgst, r.sgst];
+function extraInvoiceRow(r, headerRowIndex) {
+  return [r.gstin, r.identifier, toAbsoluteExcelRow(headerRowIndex, r.rowIndex), r.taxableValue, r.igst, r.cgst, r.sgst];
 }
 
 // invoiceLevelExtrasResult: detectInvoiceLevelExtras()'s output (2A vs
@@ -383,7 +406,7 @@ function extraInvoiceRow(r) {
 // appears in 2A is "present" at the GSTIN level, which would silently hide
 // the other 4 invoices' real Extra-in-Books amount — this sheet needs
 // every genuinely-unmatched invoice, not just vendors entirely absent.
-async function writeExtraInBooksSheet(context, invoiceLevelExtrasResult, sheetNames) {
+async function writeExtraInBooksSheet(context, invoiceLevelExtrasResult, sheetNames, booksHeaderRowIndex) {
   const headers = ["GSTIN", "Invoice/Voucher Number", "Row (in " + sheetNames.books + ")", "Taxable Value", "IGST", "CGST", "SGST"];
   const explanation = [
     "Invoice-level check: invoices present in '" + sheetNames.books + "' with no matching GSTIN + Invoice/Voucher Number in '" + sheetNames.gstr2a + "'.",
@@ -399,7 +422,7 @@ async function writeExtraInBooksSheet(context, invoiceLevelExtrasResult, sheetNa
     result = await writeReportSheet(context, "GST - Extra in Books", explanation.concat(["Not applicable to this workbook: " + invoiceLevelExtrasResult.reason + "."]), headers, [], [0, 1], EXTRA_INVOICE_RUPEE_COLUMNS);
     itemMeta = [];
   } else {
-    const rows = invoiceLevelExtrasResult.extraInBooks.map(extraInvoiceRow);
+    const rows = invoiceLevelExtrasResult.extraInBooks.map((r) => extraInvoiceRow(r, booksHeaderRowIndex));
     result = await writeReportSheet(context, "GST - Extra in Books", explanation, headers, rows, [0, 1], EXTRA_INVOICE_RUPEE_COLUMNS); // key: GSTIN + Invoice/Voucher Number
     itemMeta = invoiceLevelExtrasResult.extraInBooks.map((r, i) => ({
       rowSpanStart: i,
@@ -412,7 +435,7 @@ async function writeExtraInBooksSheet(context, invoiceLevelExtrasResult, sheetNa
   return attachTopIssueCandidates(result, "GST - Extra in Books", itemMeta);
 }
 
-async function writeExtraIn2ASheet(context, invoiceLevelExtrasResult, sheetNames) {
+async function writeExtraIn2ASheet(context, invoiceLevelExtrasResult, sheetNames, gstr2aHeaderRowIndex) {
   const headers = ["GSTIN", "Invoice/Voucher Number", "Row (in " + sheetNames.gstr2a + ")", "Taxable Value", "IGST", "CGST", "SGST"];
   const explanation = [
     "Invoice-level check: invoices present in '" + sheetNames.gstr2a + "' with no matching GSTIN + Invoice/Voucher Number in '" + sheetNames.books + "'.",
@@ -428,7 +451,7 @@ async function writeExtraIn2ASheet(context, invoiceLevelExtrasResult, sheetNames
     result = await writeReportSheet(context, "GST - Extra in 2A", explanation.concat(["Not applicable to this workbook: " + invoiceLevelExtrasResult.reason + "."]), headers, [], [0, 1], EXTRA_INVOICE_RUPEE_COLUMNS);
     itemMeta = [];
   } else {
-    const rows = invoiceLevelExtrasResult.extraIn2A.map(extraInvoiceRow);
+    const rows = invoiceLevelExtrasResult.extraIn2A.map((r) => extraInvoiceRow(r, gstr2aHeaderRowIndex));
     result = await writeReportSheet(context, "GST - Extra in 2A", explanation, headers, rows, [0, 1], EXTRA_INVOICE_RUPEE_COLUMNS); // key: GSTIN + Invoice/Voucher Number
     itemMeta = invoiceLevelExtrasResult.extraIn2A.map((r, i) => ({
       rowSpanStart: i,
@@ -459,8 +482,23 @@ const POSSIBLE_MATCH_HEADERS = [
 ];
 const POSSIBLE_MATCH_RUPEE_COLUMNS = [5, 6, 7, 8, 9, 10, 11, 12]; // both sides' Taxable Value/IGST/CGST/SGST — NOT GSTIN/identifiers/Row references/Reason
 
-function possibleMatchRow(m) {
-  return [m.gstin, m.gstr2aIdentifier, m.gstr2aRowIndex, m.booksIdentifier, m.booksRowIndex, m.gstr2a.taxableValue, m.gstr2a.igst, m.gstr2a.cgst, m.gstr2a.sgst, m.books.taxableValue, m.books.igst, m.books.cgst, m.books.sgst, m.reason];
+function possibleMatchRow(m, gstr2aHeaderRowIndex, booksHeaderRowIndex) {
+  return [
+    m.gstin,
+    m.gstr2aIdentifier,
+    toAbsoluteExcelRow(gstr2aHeaderRowIndex, m.gstr2aRowIndex),
+    m.booksIdentifier,
+    toAbsoluteExcelRow(booksHeaderRowIndex, m.booksRowIndex),
+    m.gstr2a.taxableValue,
+    m.gstr2a.igst,
+    m.gstr2a.cgst,
+    m.gstr2a.sgst,
+    m.books.taxableValue,
+    m.books.igst,
+    m.books.cgst,
+    m.books.sgst,
+    m.reason,
+  ];
 }
 
 // invoiceLevelExtrasResult: detectInvoiceLevelExtras()'s output — this
@@ -469,7 +507,7 @@ function possibleMatchRow(m) {
 // Extra sheet), not a confirmed gap either — a low-confidence amount+GSTIN
 // pairing surfaced for the reviewer to confirm or reject, never netted
 // into the Summary sheet's supportable/unsupportable figures automatically.
-async function writePossibleMatchesSheet(context, invoiceLevelExtrasResult, sheetNames) {
+async function writePossibleMatchesSheet(context, invoiceLevelExtrasResult, sheetNames, gstr2aHeaderRowIndex, booksHeaderRowIndex) {
   const explanation = [
     "Rows that could NOT be matched by invoice/voucher number at all (blank on one side, or a completely different reference scheme between '" + sheetNames.gstr2a + "' and '" + sheetNames.books + "') but where the GSTIN, taxable value, and every tax field (IGST/CGST/SGST) agree within ₹1, and both dates fall in the same calendar month.",
     "This is a LOW-CONFIDENCE, amount-based pairing — not a confirmed match. It is NOT counted in 'GST - Extra in 2A' or 'GST - Extra in Books', and NOT netted into the Summary sheet's supportable ITC figure either way.",
@@ -483,7 +521,7 @@ async function writePossibleMatchesSheet(context, invoiceLevelExtrasResult, shee
     result = await writeReportSheet(context, "GST - Possible Matches", explanation.concat(["Not applicable to this workbook: " + invoiceLevelExtrasResult.reason + "."]), POSSIBLE_MATCH_HEADERS, [], [0, 2, 4], POSSIBLE_MATCH_RUPEE_COLUMNS);
     itemMeta = [];
   } else {
-    const rows = invoiceLevelExtrasResult.possibleMatches.map(possibleMatchRow);
+    const rows = invoiceLevelExtrasResult.possibleMatches.map((m) => possibleMatchRow(m, gstr2aHeaderRowIndex, booksHeaderRowIndex));
     result = await writeReportSheet(context, "GST - Possible Matches", explanation, POSSIBLE_MATCH_HEADERS, rows, [0, 2, 4], POSSIBLE_MATCH_RUPEE_COLUMNS); // key: GSTIN + 2A Row + Books Row
     itemMeta = invoiceLevelExtrasResult.possibleMatches.map((m, i) => ({
       rowSpanStart: i,
@@ -528,6 +566,29 @@ function formatIncorrectSide(incorrectSide, sheetNames) {
   return "Undetermined";
 }
 
+function wrongHeadRow(f, gstr2aHeaderRowIndex) {
+  return [toAbsoluteExcelRow(gstr2aHeaderRowIndex, f.rowIndex), f.gstin, f.invoiceNumber, f.issue, f.expected, f.actual, f.supplierStateCode, f.placeOfSupplyStateCode, f.igst, f.cgst, f.sgst];
+}
+
+function crossSheetWrongHeadRow(f, gstr2aHeaderRowIndex, booksHeaderRowIndex, sheetNames) {
+  return [
+    f.gstin,
+    f.identifier,
+    toAbsoluteExcelRow(gstr2aHeaderRowIndex, f.gstr2aRowIndex),
+    toAbsoluteExcelRow(booksHeaderRowIndex, f.booksRowIndex),
+    formatTaxHead(f.gstr2aHead),
+    formatTaxHead(f.booksHead),
+    f.expectedHead ? formatTaxHead(f.expectedHead) : "Undetermined",
+    formatIncorrectSide(f.incorrectSide, sheetNames),
+    f.gstr2a.igst,
+    f.gstr2a.cgst,
+    f.gstr2a.sgst,
+    f.books.igst,
+    f.books.cgst,
+    f.books.sgst,
+  ];
+}
+
 // wrongHeadResult: detectWrongHead()'s output (unchanged, 2A-only,
 // single-sheet internal-consistency check).
 // crossSheetWrongHeadResult: detectCrossSheetWrongHead()'s output (2A vs
@@ -535,7 +596,7 @@ function formatIncorrectSide(incorrectSide, sheetNames) {
 // cross-sheet-wrong-head-detector.js for why neither check can replace
 // the other.
 // sheetNames: { gstr2a, books }.
-async function writeWrongHeadSheet(context, wrongHeadResult, crossSheetWrongHeadResult, sheetNames) {
+async function writeWrongHeadSheet(context, wrongHeadResult, crossSheetWrongHeadResult, sheetNames, gstr2aHeaderRowIndex, booksHeaderRowIndex) {
   const headers = ["Row (in " + sheetNames.gstr2a + ")", "GSTIN", "Invoice Number", "Issue", "Expected Head", "Actual Head", "Supplier State", "Place of Supply State", "IGST", "CGST", "SGST"];
   const rupeeColumns = [8, 9, 10]; // IGST/CGST/SGST — NOT Row (0, a row reference) or Supplier/Place of Supply State (6, 7 — state codes, not rupees)
   const explanation = [
@@ -552,7 +613,7 @@ async function writeWrongHeadSheet(context, wrongHeadResult, crossSheetWrongHead
     result = await writeReportSheet(context, "GST - Wrong Head", explanation.concat(["Not applicable to this workbook: " + wrongHeadResult.reason + "."]), headers, [], [0], rupeeColumns);
     singleSheetItemMeta = [];
   } else {
-    const rows = wrongHeadResult.flagged.map((f) => [f.rowIndex, f.gstin, f.invoiceNumber, f.issue, f.expected, f.actual, f.supplierStateCode, f.placeOfSupplyStateCode, f.igst, f.cgst, f.sgst]);
+    const rows = wrongHeadResult.flagged.map((f) => wrongHeadRow(f, gstr2aHeaderRowIndex));
     result = await writeReportSheet(context, "GST - Wrong Head", explanation, headers, rows, [0], rupeeColumns); // key: Row (source is always 2A)
     singleSheetItemMeta = wrongHeadResult.flagged.map((f, i) => ({
       rowSpanStart: i,
@@ -580,22 +641,7 @@ async function writeWrongHeadSheet(context, wrongHeadResult, crossSheetWrongHead
   if (!crossSheetWrongHeadResult.applicable) {
     crossSheetExplanation.push("Not applicable to this workbook: " + crossSheetWrongHeadResult.reason + ".");
   } else {
-    crossSheetRows = crossSheetWrongHeadResult.flagged.map((f) => [
-      f.gstin,
-      f.identifier,
-      f.gstr2aRowIndex,
-      f.booksRowIndex,
-      formatTaxHead(f.gstr2aHead),
-      formatTaxHead(f.booksHead),
-      f.expectedHead ? formatTaxHead(f.expectedHead) : "Undetermined",
-      formatIncorrectSide(f.incorrectSide, sheetNames),
-      f.gstr2a.igst,
-      f.gstr2a.cgst,
-      f.gstr2a.sgst,
-      f.books.igst,
-      f.books.cgst,
-      f.books.sgst,
-    ]);
+    crossSheetRows = crossSheetWrongHeadResult.flagged.map((f) => crossSheetWrongHeadRow(f, gstr2aHeaderRowIndex, booksHeaderRowIndex, sheetNames));
     crossSheetItemMeta = crossSheetWrongHeadResult.flagged.map((f, i) => ({
       rowSpanStart: i,
       amount: roundTo2(f.gstr2a.igst + f.gstr2a.cgst + f.gstr2a.sgst),
@@ -621,6 +667,23 @@ async function writeWrongHeadSheet(context, wrongHeadResult, crossSheetWrongHead
    Step 2: RCM (combined across both recognized sheets)
    ============================================================ */
 
+function rcmRow(source, f, amounts) {
+  return [
+    source.sheetName,
+    toAbsoluteExcelRow(source.headerRowIndex, f.rowIndex),
+    f.gstin || "(unregistered)",
+    f.invoiceNumber,
+    amounts.taxableValue,
+    amounts.igst,
+    amounts.cgst,
+    amounts.sgst,
+    f.matchedCategory ? f.matchedCategory.label : "(per 2A flag)",
+    f.matchedCategory ? f.matchedCategory.notification : "GSTR-2A 'Supply Attract Reverse Charge' flag",
+    f.source,
+    f.matchedCategory && f.matchedCategory.requiresManualConfirmation ? "Yes" : "No",
+  ];
+}
+
 async function writeRcmSheet(context, rcmBySource, materialityThreshold) {
   const headers = ["Source Sheet", "Row", "GSTIN", "Invoice/Voucher Number", "Taxable Value", "IGST", "CGST", "SGST", "Category", "Notification", "Basis", "Needs Manual Confirmation?"];
   const rupeeColumns = [4, 5, 6, 7]; // Taxable Value, IGST, CGST, SGST — NOT Row (1, a row reference)
@@ -639,20 +702,7 @@ async function writeRcmSheet(context, rcmBySource, materialityThreshold) {
     anyApplicable = true;
     for (const f of source.result.flagged) {
       const amounts = getRowAmounts(source.values, source.headerRowIndex, source.columns, f.rowIndex);
-      rows.push([
-        source.sheetName,
-        f.rowIndex,
-        f.gstin || "(unregistered)",
-        f.invoiceNumber,
-        amounts.taxableValue,
-        amounts.igst,
-        amounts.cgst,
-        amounts.sgst,
-        f.matchedCategory ? f.matchedCategory.label : "(per 2A flag)",
-        f.matchedCategory ? f.matchedCategory.notification : "GSTR-2A 'Supply Attract Reverse Charge' flag",
-        f.source,
-        f.matchedCategory && f.matchedCategory.requiresManualConfirmation ? "Yes" : "No",
-      ]);
+      rows.push(rcmRow(source, f, amounts));
       itemMeta.push({
         rowSpanStart: rows.length - 1,
         amount: amounts.totalTax,
@@ -672,6 +722,10 @@ async function writeRcmSheet(context, rcmBySource, materialityThreshold) {
 /* ============================================================
    Step 2: Ineligible ITC (combined across both recognized sheets)
    ============================================================ */
+
+function ineligibleItcRow(source, f, amounts) {
+  return [source.sheetName, toAbsoluteExcelRow(source.headerRowIndex, f.rowIndex), f.gstin, f.invoiceNumber, amounts.taxableValue, amounts.igst, amounts.cgst, amounts.sgst, f.matchedCategory.label, f.matchedCategory.section, f.matchedKeyword];
+}
 
 async function writeIneligibleItcSheet(context, itcBySource, materialityThreshold) {
   const headers = ["Source Sheet", "Row", "GSTIN", "Invoice/Voucher Number", "Taxable Value", "IGST", "CGST", "SGST", "Category", "Section", "Matched Keyword"];
@@ -693,7 +747,7 @@ async function writeIneligibleItcSheet(context, itcBySource, materialityThreshol
     }
     for (const f of source.result.flagged) {
       const amounts = getRowAmounts(source.values, source.headerRowIndex, source.columns, f.rowIndex);
-      rows.push([source.sheetName, f.rowIndex, f.gstin, f.invoiceNumber, amounts.taxableValue, amounts.igst, amounts.cgst, amounts.sgst, f.matchedCategory.label, f.matchedCategory.section, f.matchedKeyword]);
+      rows.push(ineligibleItcRow(source, f, amounts));
       itemMeta.push({
         rowSpanStart: rows.length - 1,
         amount: amounts.totalTax,
@@ -713,6 +767,10 @@ async function writeIneligibleItcSheet(context, itcBySource, materialityThreshol
 /* ============================================================
    Step 2: Duplicate Invoices (combined across both recognized sheets)
    ============================================================ */
+
+function duplicateInvoiceRow(source, clusterIdx, cluster, m, amounts) {
+  return [source.sheetName, clusterIdx + 1, cluster.gstin, toAbsoluteExcelRow(source.headerRowIndex, m.rowIndex), m.identifier, amounts.taxableValue, amounts.igst, amounts.cgst, amounts.sgst, cluster.matchReason, cluster.dateSpreadDays];
+}
 
 async function writeDuplicateInvoicesSheet(context, dupBySource) {
   const headers = ["Source Sheet", "Cluster #", "GSTIN", "Row", "Identifier", "Taxable Value", "IGST", "CGST", "SGST", "Match Reason", "Date Spread (days)"];
@@ -740,7 +798,7 @@ async function writeDuplicateInvoicesSheet(context, dupBySource) {
       for (const m of cluster.members) {
         const amounts = getRowAmounts(source.values, source.headerRowIndex, source.columns, m.rowIndex);
         memberTaxTotals.push(amounts.totalTax);
-        rows.push([source.sheetName, clusterIdx + 1, cluster.gstin, m.rowIndex, m.identifier, amounts.taxableValue, amounts.igst, amounts.cgst, amounts.sgst, cluster.matchReason, cluster.dateSpreadDays]);
+        rows.push(duplicateInvoiceRow(source, clusterIdx, cluster, m, amounts));
       }
       // Same "every occurrence beyond the single legitimate one" over-claim
       // math as sumDuplicateOverclaim() below — used here just to size/rank
@@ -772,6 +830,10 @@ async function writeDuplicateInvoicesSheet(context, dupBySource) {
    error for review, not a GST-law violation.
    ============================================================ */
 
+function rateMismatchRow(source, f) {
+  return [source.sheetName, toAbsoluteExcelRow(source.headerRowIndex, f.rowIndex), f.gstin || "", f.invoiceNumber || "", f.taxableValue, f.ratePercent, f.expectedTotalTax, f.actualTotalTax, f.difference];
+}
+
 async function writeRateMismatchSheet(context, rateMismatchBySource) {
   const headers = ["Source Sheet", "Row", "GSTIN", "Invoice/Voucher Number", "Taxable Value", "Rate (%)", "Expected Tax", "Actual Tax", "Difference"];
   const rupeeColumns = [4, 6, 7, 8]; // Taxable Value, Expected Tax, Actual Tax, Difference — NOT Row (1) or Rate (5, a percentage, not rupees)
@@ -790,7 +852,7 @@ async function writeRateMismatchSheet(context, rateMismatchBySource) {
     if (!source.result.applicable) continue;
     anyApplicable = true;
     for (const f of source.result.flagged) {
-      rows.push([source.sheetName, f.rowIndex, f.gstin || "", f.invoiceNumber || "", f.taxableValue, f.ratePercent, f.expectedTotalTax, f.actualTotalTax, f.difference]);
+      rows.push(rateMismatchRow(source, f));
       itemMeta.push({
         rowSpanStart: rows.length - 1,
         amount: Math.abs(f.difference),
@@ -1001,6 +1063,7 @@ async function writeSummarySheet(context, summary, sheetNames) {
 
 // data: {
 //   sheetNames: { gstr2a, books },
+//   gstr2aHeaderRowIndex, booksHeaderRowIndex,  // each source sheet's own header row position — needed to convert every detector's relative rowIndex into a real Excel row number for the sheets whose input isn't already a `...bySource` array (see toAbsoluteExcelRow above)
 //   comparisonSummary,                 // Step 1 output, unmodified — vendor-level Matched/Discrepancy/Missing status, still used for the Summary's vendor counts and the Mismatch sheet
 //   invoiceLevelExtrasResult,          // detectInvoiceLevelExtras() — 2A vs Books, same invoice, GSTIN+Invoice/Voucher Number — drives Extra in 2A / Extra in Books
 //   wrongHeadResult,                   // detectWrongHead() on the 2A sheet
@@ -1024,11 +1087,11 @@ async function writeGstReconciliationReport(context, data) {
   const materialityThreshold = roundTo2(summary.totalTaxPer2A * MATERIALITY_PERCENT);
 
   const results = [
-    await writeExtraInBooksSheet(context, data.invoiceLevelExtrasResult, data.sheetNames),
-    await writeExtraIn2ASheet(context, data.invoiceLevelExtrasResult, data.sheetNames),
-    await writePossibleMatchesSheet(context, data.invoiceLevelExtrasResult, data.sheetNames),
+    await writeExtraInBooksSheet(context, data.invoiceLevelExtrasResult, data.sheetNames, data.booksHeaderRowIndex),
+    await writeExtraIn2ASheet(context, data.invoiceLevelExtrasResult, data.sheetNames, data.gstr2aHeaderRowIndex),
+    await writePossibleMatchesSheet(context, data.invoiceLevelExtrasResult, data.sheetNames, data.gstr2aHeaderRowIndex, data.booksHeaderRowIndex),
     await writeMismatchSheet(context, data.comparisonSummary, data.sheetNames),
-    await writeWrongHeadSheet(context, data.wrongHeadResult, data.crossSheetWrongHeadResult, data.sheetNames),
+    await writeWrongHeadSheet(context, data.wrongHeadResult, data.crossSheetWrongHeadResult, data.sheetNames, data.gstr2aHeaderRowIndex, data.booksHeaderRowIndex),
     await writeRcmSheet(context, data.rcmBySource, materialityThreshold),
     await writeIneligibleItcSheet(context, data.itcBySource, materialityThreshold),
     await writeDuplicateInvoicesSheet(context, data.dupBySource),
@@ -1717,5 +1780,19 @@ if (typeof module !== "undefined" && module.exports) {
     isDataRow,
     findGstSheetHeaderRowIndex,
     findWrongHeadSectionHeader,
+    // Exported for the "Row" column regression test (gst-report-writer-
+    // row-reference-test.js) — pure, no Excel dependency. toAbsoluteExcelRow
+    // is the one conversion every row-builder below routes through; the
+    // rest are the actual per-sheet row-builders production code calls, so
+    // the test exercises the real code path, not a re-derived copy of it.
+    toAbsoluteExcelRow,
+    extraInvoiceRow,
+    possibleMatchRow,
+    wrongHeadRow,
+    crossSheetWrongHeadRow,
+    rcmRow,
+    ineligibleItcRow,
+    duplicateInvoiceRow,
+    rateMismatchRow,
   };
 }
