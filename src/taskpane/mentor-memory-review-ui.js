@@ -118,7 +118,12 @@ function mentorRenderMemoryReviewPanel() {
   container.innerHTML = html;
 }
 
-const MENTOR_MEMORY_REVIEW_ROW_STYLE = "padding:6px;margin-bottom:4px;border:1px solid #2a2d35;border-radius:4px;background:#1e2129;";
+// color:#fff is load-bearing, not decorative — this dark background never
+// had an explicit text color, so every row's text was falling back to the
+// browser default (black), nearly invisible against #1e2129. Individual
+// elements that set their own lighter/muted color (e.g. the ":#9aa0a6"
+// sheet-name label, ":#c2c6cc" field labels) still correctly override this.
+const MENTOR_MEMORY_REVIEW_ROW_STYLE = "padding:6px;margin-bottom:4px;border:1px solid #2a2d35;border-radius:4px;background:#1e2129;color:#fff;";
 
 function mentorRenderSheetMemoryReviewRow(record) {
   const sig = record.structural_signature;

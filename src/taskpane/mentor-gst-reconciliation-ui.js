@@ -81,6 +81,12 @@ const mentorGstHandledThisSession = new Set(); // "gstr2aSheetName::booksSheetNa
 let mentorGstTopIssues = []; // ranked list from the most recent generate/regenerate
 let mentorGstTopIssuesShowAll = false;
 let mentorGstConfirmationPreamble = ""; // the "Reconciliation complete..." line + preservation note, rendered above the list
+// Set when clicking a Top Issue fails to navigate (sheet renamed/deleted, a
+// stale row reference, or any other Excel API error) — previously these
+// failures were only console.error'd, so a click that silently did nothing
+// gave the user no signal at all that something went wrong (vs. just being
+// unresponsive). Cleared at the start of every click attempt.
+let mentorGstSelectIssueError = "";
 
 // Ineligible ITC vendor-name suggestion feature state — separate,
 // optional, only ever populated when the description-based rule found
@@ -712,6 +718,12 @@ function mentorRenderGstTopIssuesList() {
 
   let html = "<div style='background:#1a1a2e;border-left:4px solid #28a745;padding:8px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;'>";
   html += banner;
+  if (mentorGstSelectIssueError) {
+    html +=
+      "<div style='background:#3a1f24;border-left:3px solid #dc3545;padding:5px 8px;border-radius:4px;margin-bottom:6px;color:#f0b4bb;'>" +
+      mentorGstEscapeHtml(mentorGstSelectIssueError) +
+      "</div>";
+  }
   html += mentorGstEscapeHtml(mentorGstConfirmationPreamble) + "<br/>";
   html += "<div style='margin-top:6px;color:#9aa0a6;'>Top issues (highest priority, then largest rupee amount, first):</div>";
   html += "<ol style='margin:6px 0 6px 0;padding-left:16px;'>";
@@ -795,6 +807,7 @@ window.mentorGstToggleShowAllIssues = function () {
 // rowSpan are computed) — entire row, not just column A, so it's obvious
 // at a glance regardless of which column happens to be in view.
 window.mentorGstSelectIssue = async function (index) {
+  mentorGstSelectIssueError = "";
   const issue = mentorGstTopIssues[index];
   if (!issue) return;
   try {
@@ -803,7 +816,9 @@ window.mentorGstSelectIssue = async function (index) {
       sheet.load("isNullObject");
       await context.sync();
       if (sheet.isNullObject) {
-        console.error("MENTOR GST reconciliation: '" + issue.sheetName + "' no longer exists — can't select the row");
+        const message = "Couldn't open '" + issue.sheetName + "' — it no longer exists in this workbook. Try Regenerate to refresh the list.";
+        console.error("MENTOR GST reconciliation: " + message);
+        mentorGstSelectIssueError = message;
         return;
       }
       sheet.activate();
@@ -812,8 +827,12 @@ window.mentorGstSelectIssue = async function (index) {
       await context.sync();
     });
   } catch (error) {
+    const message = "Couldn't select that row on '" + issue.sheetName + "' (" + error.message + "). Try Regenerate to refresh the list.";
     console.error("MENTOR GST reconciliation: failed to select issue row", error);
+    mentorGstSelectIssueError = message;
   }
+
+  if (mentorGstSelectIssueError) mentorRenderGstTopIssuesList();
 };
 
 window.mentorAcceptGstReconciliation = async function () {
