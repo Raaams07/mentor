@@ -164,9 +164,10 @@
     <div class="eyebrow">// currently in testing</div>
     <h1>GST reconciliation, without the tab-hopping.</h1>
     <p class="sub">MENTOR reads your GSTR-2A and Books, finds what doesn't match, and explains exactly why — right inside Excel.</p>
+    <p class="mono" style="font-size:12px;color:var(--ink-soft);letter-spacing:0.02em;margin-bottom:14px;">Early access is limited to the first practitioners who sign up.</p>
     <form class="cta-row" action="https://formspree.io/f/xzepvllz" method="POST" onsubmit="mentorSubmitSignup(event, '');">
       <input type="email" name="email" placeholder="you@firm.com" required>
-      <button type="submit">Notify me</button>
+      <button type="submit">Reserve early access</button>
     </form>
     <p id="confirm" style="display:none;font-size:14px;color:var(--green);font-family:'JetBrains Mono',monospace;">✓ You're on the list.</p>
     <p id="error" style="display:none;font-size:14px;color:var(--red);font-family:'JetBrains Mono',monospace;">Something went wrong — please try again.</p>
@@ -254,18 +255,8 @@
       <p class="stat">// MENTOR is what a sharp assistant catches — every file, without getting tired on the fourth one of the day.</p>
     </div>
     <div class="ledger ledger--dark" style="background:#232320;border-color:#3A3A34;">
-      <div class="ledger-head" style="border-color:#3A3A34;color:#9C9A90;">
-        <span>Check</span><span></span><span></span><span>Result</span>
-      </div>
-      <div class="ledger-row">
-        <span>Row-number mapping</span><span></span><span></span><span class="status matched">verified</span>
-      </div>
-      <div class="ledger-row">
-        <span>Duplicate invoice logic</span><span></span><span></span><span class="status matched">verified</span>
-      </div>
-      <div class="ledger-row">
-        <span>Column-memory persistence</span><span></span><span></span><span class="status matched">verified</span>
-      </div>
+      <div class="mono" style="font-size:12px;color:#9FD6B4;letter-spacing:0.02em;margin-bottom:10px;">A real catch from testing:</div>
+      <p style="color:#E9E7DF;font-size:15px;line-height:1.6;">a duplicate invoice worth <span class="mono" style="color:#9FD6B4;">₹1,74,614</span> — counted twice in the books, missed on manual review, caught automatically by MENTOR and confirmed independently.</p>
     </div>
   </div>
 </section>
@@ -275,7 +266,7 @@
   <p style="color:var(--ink-soft);max-width:420px;margin:0 auto 28px;">MENTOR is being tested against real reconciliation files right now. Leave your email and we'll let you know the moment it's ready.</p>
   <form class="cta-row" action="https://formspree.io/f/xzepvllz" method="POST" onsubmit="mentorSubmitSignup(event, '2');">
     <input type="email" name="email" placeholder="you@firm.com" required>
-    <button type="submit">Notify me</button>
+    <button type="submit">Reserve early access</button>
   </form>
   <p id="confirm2" style="display:none;font-size:14px;color:var(--green);font-family:'JetBrains Mono',monospace;">✓ You're on the list.</p>
   <p id="error2" style="display:none;font-size:14px;color:var(--red);font-family:'JetBrains Mono',monospace;">Something went wrong — please try again.</p>
