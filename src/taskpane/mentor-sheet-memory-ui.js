@@ -148,16 +148,16 @@ function mentorRenderSheetMemoryInputPrompt(prefillValue) {
   const accent = "#9b59d0"; // distinct from the blue P&L-suggestion accent — reads as a different kind of card
   const prefill = prefillValue ? mentorEscapeHtml(prefillValue) : "";
 
-  let html = "<div style='background:#1a1a2e;border-left:4px solid " + accent + ";padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:#fff;'>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid " + accent + ";padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:var(--ink);\">";
   html += "<div style='margin-bottom:6px;'>" + mentorEscapeHtml(mentorPendingSheetMemoryPrompt.prompt) + "</div>";
   html +=
     "<input id='mentor-sheet-memory-input' type='text' placeholder=\"e.g. 'Stock levels', 'Marketing spend log'\" value=\"" +
     prefill +
-    "\" style='width:100%;box-sizing:border-box;padding:5px 7px;border-radius:4px;border:1px solid #444;background:#22252b;color:#fff;font-size:12px;margin-bottom:6px;' " +
+    "\" style=\"font-family:'Inter','Segoe UI',sans-serif;width:100%;box-sizing:border-box;padding:5px 7px;border-radius:4px;border:1px solid var(--line);background:#FFFFFF;color:var(--ink);font-size:12px;margin-bottom:6px;\" " +
     "onkeydown='if(event.key===\"Enter\"){mentorSubmitSheetMemoryAnswer();}' />";
   html += "<div>";
-  html += "<button onclick='mentorSubmitSheetMemoryAnswer()' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Save</button>";
-  html += "<button onclick='mentorSkipSheetMemoryPrompt()' style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Skip for now</button>";
+  html += "<button onclick='mentorSubmitSheetMemoryAnswer()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--green-bg);color:var(--green);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Save</button>";
+  html += "<button onclick='mentorSkipSheetMemoryPrompt()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Skip for now</button>";
   html += "</div></div>";
 
   container.innerHTML = html;
@@ -180,7 +180,7 @@ function mentorRenderSheetMemoryMismatchWarning(value, plausibility) {
 
   const headerList = plausibility.headerLabels.length ? plausibility.headerLabels.map((h) => mentorEscapeHtml(String(h))).join(", ") : "(no header row detected)";
 
-  let html = "<div style='background:#1a1a2e;border-left:4px solid #e67e22;padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:#fff;'>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid #e67e22;padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:var(--ink);\">";
   html +=
     "<div style='margin-bottom:6px;'>⚠️ \"" +
     mentorEscapeHtml(value) +
@@ -188,8 +188,8 @@ function mentorRenderSheetMemoryMismatchWarning(value, plausibility) {
     headerList +
     "</b>. Sure that's right?</div>";
   html += "<div>";
-  html += "<button onclick='mentorConfirmSheetMemoryMismatch()' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Save anyway</button>";
-  html += "<button onclick='mentorEditSheetMemoryMismatch()' style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Let me edit it</button>";
+  html += "<button onclick='mentorConfirmSheetMemoryMismatch()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--green-bg);color:var(--green);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Save anyway</button>";
+  html += "<button onclick='mentorEditSheetMemoryMismatch()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Let me edit it</button>";
   html += "</div></div>";
 
   container.innerHTML = html;
@@ -218,7 +218,7 @@ window.mentorSubmitSheetMemoryAnswer = async function () {
   const input = document.getElementById("mentor-sheet-memory-input");
   const value = input ? input.value.trim() : "";
   if (!value) {
-    if (input) input.style.border = "1px solid #dc3545"; // flag the empty field instead of silently doing nothing
+    if (input) input.style.border = "1px solid var(--red)"; // flag the empty field instead of silently doing nothing
     return;
   }
 

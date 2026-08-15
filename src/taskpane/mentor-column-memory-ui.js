@@ -176,17 +176,17 @@ function mentorRenderNextColumnMemoryPrompt() {
 
   mentorPendingColumnMemoryPrompt = mentorColumnMemoryQueue.shift();
   const p = mentorPendingColumnMemoryPrompt;
-  const accent = "#dc3545"; // distinct red — this is a BLOCKING prompt (no proposal card until resolved), not an FYI
+  const accent = "var(--red)"; // distinct red — this is a BLOCKING prompt (no proposal card until resolved), not an FYI
 
-  let html = "<div style='background:#1a1a2e;border-left:4px solid " + accent + ";padding:10px;border-radius:6px;font-size:12px;color:#fff;'>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid " + accent + ";padding:10px;border-radius:6px;font-size:12px;color:var(--ink);\">";
   html += "<div style='margin-bottom:8px;'>" + mentorColumnMemoryEscapeHtml(p.prompt) + "</div>";
   p.candidates.forEach((c, i) => {
     const preview = (c.sampleValues || []).slice(0, 5).map((v) => mentorColumnMemoryEscapeHtml(String(v))).join(", ");
-    html += "<div onclick='mentorSubmitColumnMemoryAnswer(" + i + ")' style='cursor:pointer;padding:6px;margin-bottom:4px;border:1px solid #444;border-radius:4px;background:#22252b;'>";
-    html += "<strong>" + mentorColumnMemoryEscapeHtml(c.header || "(blank header)") + "</strong><br/>";
-    html += "<span style='color:#9aa0a6;font-size:11px;'>e.g. " + preview + "</span></div>";
+    html += "<div onclick='mentorSubmitColumnMemoryAnswer(" + i + ")' style='cursor:pointer;padding:6px;margin-bottom:4px;border:1px solid var(--line);border-radius:4px;background:var(--paper);'>";
+    html += "<strong class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink);\">" + mentorColumnMemoryEscapeHtml(c.header || "(blank header)") + "</strong><br/>";
+    html += "<span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);font-size:11px;\">e.g. " + preview + "</span></div>";
   });
-  html += "<button onclick='mentorSkipColumnMemoryPrompt()' style='margin-top:4px;padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Skip for now</button>";
+  html += "<button onclick='mentorSkipColumnMemoryPrompt()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-top:4px;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Skip for now</button>";
   html += "</div>";
 
   container.innerHTML = html;

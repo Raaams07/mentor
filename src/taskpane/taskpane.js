@@ -1076,7 +1076,7 @@ const { mentorMemoryReviewInit } = require("./mentor-memory-review-ui.js");
     const container = document.getElementById("mentor-suggestion");
     if (container) {
       const shortDesc = formulaInfo.description.replace(/^I can pull /, "Pulled ").replace(/ — want me to fill it in\?$/, "");
-      container.innerHTML = "<div style='color:#9aa0a6;font-size:11px;'>" + shortDesc + " — move on to keep it, or type over it to replace.</div>";
+      container.innerHTML = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;color:var(--ink-soft);font-size:11px;\">" + shortDesc + " — move on to keep it, or type over it to replace.</div>";
     }
   }
   
@@ -1310,9 +1310,9 @@ const { mentorMemoryReviewInit } = require("./mentor-memory-review-ui.js");
     }
   
     const accent = "#00B0F0";
-  
-    let html = "<div onclick='mentorExpandBadge()' style='cursor:pointer;background:#1a1a2e;border-left:4px solid " + accent + ";";
-    html += "padding:6px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;display:flex;align-items:center;'>";
+
+    let html = "<div onclick='mentorExpandBadge()' style=\"font-family:'Inter','Segoe UI',sans-serif;cursor:pointer;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid " + accent + ";";
+    html += "padding:6px 10px;border-radius:6px;font-size:11px;color:var(--ink-soft);display:flex;align-items:center;\">";
     html += "<span style='display:inline-block;width:7px;height:7px;border-radius:50%;background:" + accent + ";margin-right:7px;'></span>";
     html += "MENTOR noticed something — tap to see</div>";
   
@@ -1329,17 +1329,17 @@ const { mentorMemoryReviewInit } = require("./mentor-memory-review-ui.js");
     if (!mentorCurrentStage) return;
     const stage = mentorCurrentStage;
     const container = document.getElementById("mentor-suggestion");
-    const cardBg = "#22252b";
+    const cardBg = "#FFFFFF";
     const accent = "#00B0F0";
-  
-    let html = "<div style='background:" + cardBg + ";border-left:4px solid " + accent + ";";
-    html += "padding:10px 10px 10px 12px;margin:6px 0;border-radius:6px;font-size:12px;line-height:1.5;color:#fff;'>";
-    html += "<strong style='color:#fff;'>" + stage.title + "</strong><br/>";
-    html += "<span style='color:#cfd2d8;'>" + stage.message + "</span><br/>";
+
+    let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:" + cardBg + ";border:1px solid var(--line);border-left:4px solid " + accent + ";";
+    html += "padding:10px 10px 10px 12px;margin:6px 0;border-radius:6px;font-size:12px;line-height:1.5;color:var(--ink);\">";
+    html += "<strong style='color:var(--ink);'>" + stage.title + "</strong><br/>";
+    html += "<span style='color:var(--ink-soft);'>" + stage.message + "</span><br/>";
     html += "<div style='margin-top:6px;'>";
-    html += "<button onclick='mentorAcceptStage(\"" + stage.action + "\")' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Do it for me</button>";
-    html += "<button onclick='mentorShowManualSteps(\"" + stage.action + "\")' style='margin-right:6px;padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Show me how</button>";
-    html += "<button onclick='mentorDismissStage()' style='padding:3px 10px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Not now</button>";
+    html += "<button onclick='mentorAcceptStage(\"" + stage.action + "\")' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--green-bg);color:var(--green);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Do it for me</button>";
+    html += "<button onclick='mentorShowManualSteps(\"" + stage.action + "\")' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Show me how</button>";
+    html += "<button onclick='mentorDismissStage()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Not now</button>";
     html += "</div></div>";
   
     container.innerHTML = html;
@@ -1809,5 +1809,5 @@ const { mentorMemoryReviewInit } = require("./mentor-memory-review-ui.js");
   window.mentorShowManualSteps = function(action) {
     const container = document.getElementById("mentor-suggestion");
     const steps = mentorManualSteps[action] || "Steps not available yet.";
-    container.innerHTML += "<div style='background:#1a1a2e;color:#cfd2d8;font-size:11px;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-line;'>" + steps + "</div>";
+    container.innerHTML += "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);color:var(--ink-soft);font-size:11px;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-line;\">" + steps + "</div>";
   };

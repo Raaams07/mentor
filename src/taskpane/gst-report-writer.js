@@ -45,6 +45,20 @@ function roundTo2(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+// Splits a combined tax total into its non-zero IGST/CGST/SGST components,
+// for display alongside a Top Issues amount (e.g. "CGST X + SGST Y") so the
+// total isn't shown as an unexplained lump sum. Omitted (null) when fewer
+// than two components are non-zero — a single-component total (e.g. an
+// IGST-only interstate transaction) has nothing to break down; showing
+// "IGST X" as a "breakdown" of a total that already IS X would be noise.
+function buildTaxBreakdown(igst, cgst, sgst) {
+  const parts = [];
+  if (roundTo2(igst) !== 0) parts.push({ label: "IGST", amount: roundTo2(igst) });
+  if (roundTo2(cgst) !== 0) parts.push({ label: "CGST", amount: roundTo2(cgst) });
+  if (roundTo2(sgst) !== 0) parts.push({ label: "SGST", amount: roundTo2(sgst) });
+  return parts.length >= 2 ? parts : null;
+}
+
 // Builds a row's identity key from its key columns. NOT `row[c] || ""` —
 // a key column is very often a rowIndex, and rowIndex 0 (the first flagged
 // row) is a legitimate, common value that `||` would wrongly treat as
@@ -95,6 +109,7 @@ function attachTopIssueCandidates(result, sheetName, itemMetaList) {
     rowIndex: result.headerRowIdx + 1 + m.rowSpanStart,
     rowSpan: m.rowSpan || 1,
     amount: m.amount,
+    breakdown: m.breakdown || null,
     reason: m.reason,
     category: m.category,
     tier: m.tier,
@@ -429,6 +444,7 @@ async function writeExtraInBooksSheet(context, invoiceLevelExtrasResult, sheetNa
     itemMeta = invoiceLevelExtrasResult.extraInBooks.map((r, i) => ({
       rowSpanStart: i,
       amount: roundTo2(r.igst + r.cgst + r.sgst),
+      breakdown: buildTaxBreakdown(r.igst, r.cgst, r.sgst),
       reason: "Not yet reflected in 2A — supplier may not have filed, or filed under a different GSTIN/invoice number",
       category: "Extra in Books",
       tier: 2,
@@ -458,6 +474,7 @@ async function writeExtraIn2ASheet(context, invoiceLevelExtrasResult, sheetNames
     itemMeta = invoiceLevelExtrasResult.extraIn2A.map((r, i) => ({
       rowSpanStart: i,
       amount: roundTo2(r.igst + r.cgst + r.sgst),
+      breakdown: buildTaxBreakdown(r.igst, r.cgst, r.sgst),
       reason: "Not yet reflected in Books — not booked yet, wrong GSTIN/invoice number, or not this taxpayer's purchase",
       category: "Extra in 2A",
       tier: 2,
@@ -528,6 +545,7 @@ async function writePossibleMatchesSheet(context, invoiceLevelExtrasResult, shee
     itemMeta = invoiceLevelExtrasResult.possibleMatches.map((m, i) => ({
       rowSpanStart: i,
       amount: roundTo2(m.gstr2a.igst + m.gstr2a.cgst + m.gstr2a.sgst),
+      breakdown: buildTaxBreakdown(m.gstr2a.igst, m.gstr2a.cgst, m.gstr2a.sgst),
       reason: "Possible match, needs review — " + m.reason,
       category: "Possible Match",
       tier: 3,
@@ -620,6 +638,7 @@ async function writeWrongHeadSheet(context, wrongHeadResult, crossSheetWrongHead
     singleSheetItemMeta = wrongHeadResult.flagged.map((f, i) => ({
       rowSpanStart: i,
       amount: roundTo2(f.igst + f.cgst + f.sgst),
+      breakdown: buildTaxBreakdown(f.igst, f.cgst, f.sgst),
       reason: "Charged " + formatTaxHead(f.actual) + ", should be " + formatTaxHead(f.expected) + " per Place of Supply",
       category: "Wrong Head",
       tier: 3,
@@ -647,6 +666,7 @@ async function writeWrongHeadSheet(context, wrongHeadResult, crossSheetWrongHead
     crossSheetItemMeta = crossSheetWrongHeadResult.flagged.map((f, i) => ({
       rowSpanStart: i,
       amount: roundTo2(f.gstr2a.igst + f.gstr2a.cgst + f.gstr2a.sgst),
+      breakdown: buildTaxBreakdown(f.gstr2a.igst, f.gstr2a.cgst, f.gstr2a.sgst),
       reason: "Invoice " + f.identifier + ": " + sheetNames.gstr2a + " shows " + formatTaxHead(f.gstr2aHead) + ", " + sheetNames.books + " shows " + formatTaxHead(f.booksHead) + " (" + formatIncorrectSide(f.incorrectSide, sheetNames) + " incorrect)",
       category: "Wrong Head",
       tier: 3,
@@ -708,6 +728,7 @@ async function writeRcmSheet(context, rcmBySource, materialityThreshold) {
       itemMeta.push({
         rowSpanStart: rows.length - 1,
         amount: amounts.totalTax,
+        breakdown: buildTaxBreakdown(amounts.igst, amounts.cgst, amounts.sgst),
         reason: "RCM: " + (f.matchedCategory ? f.matchedCategory.label : "flagged by GSTR-2A's own reverse-charge indicator") + " (" + source.sheetName + ")",
         category: "RCM",
         tier: amounts.totalTax >= materialityThreshold ? 1 : 3,
@@ -753,6 +774,7 @@ async function writeIneligibleItcSheet(context, itcBySource, materialityThreshol
       itemMeta.push({
         rowSpanStart: rows.length - 1,
         amount: amounts.totalTax,
+        breakdown: buildTaxBreakdown(amounts.igst, amounts.cgst, amounts.sgst),
         reason: "Ineligible ITC: " + f.matchedCategory.label + " (" + f.matchedCategory.section + ", " + source.sheetName + ")",
         category: "Ineligible ITC",
         tier: amounts.totalTax >= materialityThreshold ? 1 : 3,
@@ -1406,35 +1428,42 @@ function topIssueFromVendorRow(row) {
 
 // row: [GSTIN, Invoice/Voucher Number, Row, Taxable Value, IGST, CGST, SGST, ...Reviewer columns]
 function topIssueFromExtraInvoiceRow(row, kind) {
-  const amount = roundTo2(toNumber(row[4]) + toNumber(row[5]) + toNumber(row[6]));
+  const igst = toNumber(row[4]), cgst = toNumber(row[5]), sgst = toNumber(row[6]);
+  const amount = roundTo2(igst + cgst + sgst);
+  const breakdown = buildTaxBreakdown(igst, cgst, sgst);
   if (kind === "extraInBooks") {
-    return { amount, reason: "Not yet reflected in 2A — supplier may not have filed, or filed under a different GSTIN/invoice number", category: "Extra in Books", tier: 2 };
+    return { amount, breakdown, reason: "Not yet reflected in 2A — supplier may not have filed, or filed under a different GSTIN/invoice number", category: "Extra in Books", tier: 2 };
   }
-  return { amount, reason: "Not yet reflected in Books — not booked yet, wrong GSTIN/invoice number, or not this taxpayer's purchase", category: "Extra in 2A", tier: 2 };
+  return { amount, breakdown, reason: "Not yet reflected in Books — not booked yet, wrong GSTIN/invoice number, or not this taxpayer's purchase", category: "Extra in 2A", tier: 2 };
 }
 
 // row: [GSTIN, 2A Invoice/Voucher Number, 2A Row, Books Invoice/Voucher Number, Books Row, 2A Taxable Value, 2A IGST, 2A CGST, 2A SGST, ...Books amounts, Reason, ...Reviewer columns]
 function topIssueFromPossibleMatchRow(row) {
-  const amount = roundTo2(toNumber(row[6]) + toNumber(row[7]) + toNumber(row[8]));
-  return { amount, reason: "Possible match, needs review — " + row[13], category: "Possible Match", tier: 3 };
+  const igst = toNumber(row[6]), cgst = toNumber(row[7]), sgst = toNumber(row[8]);
+  const amount = roundTo2(igst + cgst + sgst);
+  return { amount, breakdown: buildTaxBreakdown(igst, cgst, sgst), reason: "Possible match, needs review — " + row[13], category: "Possible Match", tier: 3 };
 }
 
 function topIssueFromWrongHeadRow(row) {
-  return { amount: roundTo2(toNumber(row[8]) + toNumber(row[9]) + toNumber(row[10])), reason: "Charged " + row[5] + ", should be " + row[4] + " per Place of Supply", category: "Wrong Head", tier: 3 };
+  const igst = toNumber(row[8]), cgst = toNumber(row[9]), sgst = toNumber(row[10]);
+  return { amount: roundTo2(igst + cgst + sgst), breakdown: buildTaxBreakdown(igst, cgst, sgst), reason: "Charged " + row[5] + ", should be " + row[4] + " per Place of Supply", category: "Wrong Head", tier: 3 };
 }
 
 function topIssueFromCrossSheetWrongHeadRow(row) {
-  return { amount: roundTo2(toNumber(row[8]) + toNumber(row[9]) + toNumber(row[10])), reason: "Invoice " + row[1] + ": " + row[4] + " vs " + row[5] + " (" + row[7] + " incorrect)", category: "Wrong Head", tier: 3 };
+  const igst = toNumber(row[8]), cgst = toNumber(row[9]), sgst = toNumber(row[10]);
+  return { amount: roundTo2(igst + cgst + sgst), breakdown: buildTaxBreakdown(igst, cgst, sgst), reason: "Invoice " + row[1] + ": " + row[4] + " vs " + row[5] + " (" + row[7] + " incorrect)", category: "Wrong Head", tier: 3 };
 }
 
 function topIssueFromRcmRow(row, materialityThreshold) {
-  const amount = roundTo2(toNumber(row[5]) + toNumber(row[6]) + toNumber(row[7]));
-  return { amount, reason: "RCM: " + row[8] + " (" + row[0] + ")", category: "RCM", tier: amount >= materialityThreshold ? 1 : 3 };
+  const igst = toNumber(row[5]), cgst = toNumber(row[6]), sgst = toNumber(row[7]);
+  const amount = roundTo2(igst + cgst + sgst);
+  return { amount, breakdown: buildTaxBreakdown(igst, cgst, sgst), reason: "RCM: " + row[8] + " (" + row[0] + ")", category: "RCM", tier: amount >= materialityThreshold ? 1 : 3 };
 }
 
 function topIssueFromIneligibleItcRow(row, materialityThreshold) {
-  const amount = roundTo2(toNumber(row[5]) + toNumber(row[6]) + toNumber(row[7]));
-  return { amount, reason: "Ineligible ITC: " + row[8] + " (" + row[9] + ", " + row[0] + ")", category: "Ineligible ITC", tier: amount >= materialityThreshold ? 1 : 3 };
+  const igst = toNumber(row[5]), cgst = toNumber(row[6]), sgst = toNumber(row[7]);
+  const amount = roundTo2(igst + cgst + sgst);
+  return { amount, breakdown: buildTaxBreakdown(igst, cgst, sgst), reason: "Ineligible ITC: " + row[8] + " (" + row[9] + ", " + row[0] + ")", category: "Ineligible ITC", tier: amount >= materialityThreshold ? 1 : 3 };
 }
 
 // row: [Source Sheet, Row, GSTIN, Invoice/Voucher Number, Taxable Value, Rate (%), Expected Tax, Actual Tax, Difference, ...Reviewer columns]
@@ -1875,6 +1904,7 @@ if (typeof module !== "undefined" && module.exports) {
     topIssueFromIneligibleItcRow,
     topIssueFromRateMismatchRow,
     topIssuesFromDuplicateDataRows,
+    buildTaxBreakdown,
     isDataRow,
     findGstSheetHeaderRowIndex,
     findWrongHeadSectionHeader,

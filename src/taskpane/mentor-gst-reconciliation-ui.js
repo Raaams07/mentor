@@ -446,8 +446,8 @@ async function mentorShowPersistentGstSummary(context, proposal, regeneratePropo
   mentorGstTopIssues = readBack.topIssues;
   mentorGstTopIssuesShowAll = false;
   mentorGstConfirmationPreamble =
-    "On file — " + readBack.topIssues.length + " item(s) currently flagged across the generated 'GST - ...' sheets" +
-    " (Priority 1 threshold: RCM/Ineligible ITC items ≥ " + mentorGstFormatAmount(readBack.materialityThreshold) + ").";
+    "On file — <span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;\">" + readBack.topIssues.length + "</span> item(s) currently flagged across the generated 'GST - ...' sheets" +
+    " (Priority 1 threshold: RCM/Ineligible ITC items ≥ <span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;\">" + mentorGstFormatAmount(readBack.materialityThreshold) + "</span>).";
 
   mentorGstSetupIneligibleItcVendorTrigger(proposal);
   mentorPendingGstProposal = regenerateProposal;
@@ -465,10 +465,10 @@ async function mentorShowPersistentGstSummary(context, proposal, regeneratePropo
 
 function mentorRenderGstExplainHtml(explanation) {
   const accent = "#00B0F0"; // same visual register as the general P&L-suggestion badge — this is informational, not a proposal needing accept/dismiss
-  let html = "<div style='background:#1a1a2e;border-left:4px solid " + accent + ";padding:8px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;line-height:1.5;'>";
-  html += "<strong style='color:#fff;'>" + mentorGstEscapeHtml(explanation.ruleLabel) + "</strong><br/>";
-  html += mentorGstEscapeHtml(explanation.whichRuleFired) + "<br/>";
-  html += "<div style='margin-top:4px;color:#9aa0a6;'>" + mentorGstEscapeHtml(explanation.legalCitation) + "</div>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid " + accent + ";padding:8px 10px;border-radius:6px;font-size:11px;color:var(--ink-soft);line-height:1.5;\">";
+  html += "<strong class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink);\">" + mentorGstEscapeHtml(explanation.ruleLabel) + "</strong><br/>";
+  html += "<span style=\"font-family:'Inter','Segoe UI',sans-serif;\">" + mentorGstEscapeHtml(explanation.whichRuleFired) + "</span><br/>";
+  html += "<div style=\"font-family:'Inter','Segoe UI',sans-serif;margin-top:4px;color:var(--ink-soft);\">" + mentorGstEscapeHtml(explanation.legalCitation) + "</div>";
   // Reviewer Status/Note only applies to a flagged row on one of the 8 rule
   // sheets — every caller there always passes real strings (possibly
   // empty), even when blank. A caller with no concept of "reviewer" at all
@@ -477,12 +477,12 @@ function mentorRenderGstExplainHtml(explanation) {
   // misleading "Not yet reviewed" nudge for something that isn't a
   // reviewable item.
   if (explanation.reviewerStatus !== undefined || explanation.reviewerNote !== undefined) {
-    html += "<div style='margin-top:6px;padding-top:6px;border-top:1px solid #333;'>";
+    html += "<div style=\"font-family:'Inter','Segoe UI',sans-serif;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);color:var(--ink);\">";
     if (explanation.reviewerStatus || explanation.reviewerNote) {
       html += "<strong>Reviewer:</strong> " + (explanation.reviewerStatus ? mentorGstEscapeHtml(explanation.reviewerStatus) : "(no status set)");
       if (explanation.reviewerNote) html += " — " + mentorGstEscapeHtml(explanation.reviewerNote);
     } else {
-      html += "<span style='color:#7d828a;'>Not yet reviewed — set Reviewer Status/Note directly on this row.</span>";
+      html += "<span style='color:var(--ink-soft);'>Not yet reviewed — set Reviewer Status/Note directly on this row.</span>";
     }
     html += "</div>";
   }
@@ -534,7 +534,7 @@ async function mentorRenderGstSummaryExplain(context, container, summaryValues, 
     // fallback message as before, slightly reworded now that some rows
     // ARE explainable.
     container.innerHTML =
-      "<div style='background:#1a1a2e;border-left:4px solid #6c757d;padding:8px 10px;border-radius:6px;font-size:11px;color:#9aa0a6;'>" +
+      "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid #6c757d;padding:8px 10px;border-radius:6px;font-size:11px;color:var(--ink-soft);\">" +
       "Not a traceable total — select one of the Summary sheet's total/subtotal lines for its source column(s), or a row on one of the other 'GST - ...' sheets for row-level detail.</div>";
     container.style.display = "block";
     return;
@@ -612,12 +612,12 @@ function mentorShowGstProposalCard(proposal) {
     ? "The 'GST - ...' sheets already exist — regenerating replaces them with a fresh run (any manual edits made directly on those sheets will be overwritten, since they're recreated from scratch each time)."
     : "Nothing is filed or claimed — these are proposed for your review.";
 
-  let html = "<div style='background:#1a1a2e;border-left:4px solid " + accent + ";padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:#fff;'>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid " + accent + ";padding:10px 10px 10px 12px;border-radius:6px;font-size:12px;line-height:1.5;color:var(--ink);\">";
   html += "<div style='margin-bottom:8px;'>" + mentorGstEscapeHtml(message) + "</div>";
-  html += "<div style='color:#cfd2d8;margin-bottom:8px;'>" + actionVerb + " the review sheets (Extra in Books, Extra in 2A, Mismatch, Wrong Head, RCM, Ineligible ITC, Duplicate Invoices, Summary)? " + mentorGstEscapeHtml(regenerateNote) + "</div>";
+  html += "<div style='color:var(--ink-soft);margin-bottom:8px;'>" + actionVerb + " the review sheets (Extra in Books, Extra in 2A, Mismatch, Wrong Head, RCM, Ineligible ITC, Duplicate Invoices, Summary)? " + mentorGstEscapeHtml(regenerateNote) + "</div>";
   html += "<div>";
-  html += "<button onclick='mentorAcceptGstReconciliation()' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>" + actionVerb + " the sheets</button>";
-  html += "<button onclick='mentorDismissGstReconciliation()' style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Not now</button>";
+  html += "<button onclick='mentorAcceptGstReconciliation()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--green-bg);color:var(--green);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">" + actionVerb + " the sheets</button>";
+  html += "<button onclick='mentorDismissGstReconciliation()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Not now</button>";
   html += "</div></div>";
 
   container.innerHTML = html;
@@ -638,6 +638,20 @@ function mentorGstFormatAmount(amount) {
   return "₹" + Math.round(Math.abs(amount)).toLocaleString("en-IN");
 }
 
+// issue.breakdown (from gst-report-writer.js's buildTaxBreakdown): an array
+// of { label, amount } for the non-zero IGST/CGST/SGST components that sum
+// to issue.amount, or null when there's nothing to break down (a single-
+// component total, or a total — like Mismatch's signed diff or a Duplicate
+// cluster's over-claim — that isn't a plain tax-head sum in the first
+// place). Renders "₹2,23,020 (CGST ₹1,11,510 + SGST ₹1,11,510)" so a lump
+// total is never shown without what it's actually made of.
+function mentorGstFormatAmountWithBreakdown(issue) {
+  const total = mentorGstFormatAmount(issue.amount);
+  if (!issue.breakdown || issue.breakdown.length < 2) return total;
+  const parts = issue.breakdown.map((b) => b.label + " " + mentorGstFormatAmount(b.amount)).join(" + ");
+  return total + " (" + parts + ")";
+}
+
 // TIER labels shown once as a small legend, not repeated per row — keeps
 // each list entry to one line (amount + reason) as asked, while still
 // making the ranking legible instead of just an unexplained order.
@@ -650,24 +664,24 @@ const MENTOR_GST_TIER_LABEL = { 1: "Priority 1", 2: "Priority 2", 3: "Priority 3
 function mentorRenderIneligibleItcSuggestionSectionHtml() {
   if (!mentorGstIneligibleItcVendors || mentorGstIneligibleItcVendors.length === 0) return "";
 
-  let html = "<div style='margin-top:8px;padding-top:8px;border-top:1px solid #333;'>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);\">";
 
   if (mentorGstIneligibleItcSuggestionState === "loading") {
-    html += "<div style='color:#9aa0a6;'>Checking " + mentorGstIneligibleItcVendors.length + " vendor name(s) against Section 17(5)…</div>";
+    html += "<div style='color:var(--ink-soft);'>Checking " + mentorGstIneligibleItcVendors.length + " vendor name(s) against Section 17(5)…</div>";
   } else if (mentorGstIneligibleItcSuggestionState === "done") {
     const r = mentorGstIneligibleItcSuggestionResult;
     html +=
-      "<div style='color:#cfd2d8;'>Vendor-name screening done — " + r.totalChecked + " checked, " + r.flaggedCount + " flagged, " + r.skippedCount +
+      "<div style='color:var(--ink-soft);'>Vendor-name screening done — " + r.totalChecked + " checked, " + r.flaggedCount + " flagged, " + r.skippedCount +
       " no clear match. See the amber section on 'GST - Ineligible ITC'. Unconfirmed — review before treating as ineligible.</div>";
-    html += "<a href='#' onclick='mentorGstFetchIneligibleItcVendorSuggestions(); return false;' style='color:#8ab4f8;font-size:11px;'>Run again</a>";
+    html += "<a href='#' onclick='mentorGstFetchIneligibleItcVendorSuggestions(); return false;' style=\"font-family:'Inter','Segoe UI',sans-serif;color:#0B72B9;font-size:11px;\">Run again</a>";
   } else if (mentorGstIneligibleItcSuggestionState === "error") {
-    html += "<div style='color:#f28b82;margin-bottom:4px;'>Vendor-name suggestions failed: " + mentorGstEscapeHtml(mentorGstIneligibleItcSuggestionError) + "</div>";
-    html += "<a href='#' onclick='mentorGstFetchIneligibleItcVendorSuggestions(); return false;' style='color:#8ab4f8;font-size:11px;'>Try again</a>";
+    html += "<div style='color:var(--red);margin-bottom:4px;'>Vendor-name suggestions failed: " + mentorGstEscapeHtml(mentorGstIneligibleItcSuggestionError) + "</div>";
+    html += "<a href='#' onclick='mentorGstFetchIneligibleItcVendorSuggestions(); return false;' style=\"font-family:'Inter','Segoe UI',sans-serif;color:#0B72B9;font-size:11px;\">Try again</a>";
   } else {
     html +=
-      "<div style='color:#9aa0a6;margin-bottom:4px;'>Ineligible ITC found no genuine per-transaction description to check (" +
+      "<div style='color:var(--ink-soft);margin-bottom:4px;'>Ineligible ITC found no genuine per-transaction description to check (" +
       mentorGstIneligibleItcVendors.length + " distinct vendor(s) on '" + "2A" + "'/'" + "Books" + "'). Optional — vendor-name-based suggestions from an LLM, clearly unconfirmed, for manual review only.</div>";
-    html += "<button onclick='mentorGstFetchIneligibleItcVendorSuggestions()' style='padding:3px 10px;background:#b8860b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Get vendor-name suggestions (uses AI, may take a few seconds)</button>";
+    html += "<button onclick='mentorGstFetchIneligibleItcVendorSuggestions()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:#b8860b;color:var(--ink);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Get vendor-name suggestions (uses AI, may take a few seconds)</button>";
   }
 
   html += "</div>";
@@ -688,10 +702,10 @@ function mentorRenderGstRegenerateBannerHtml() {
     proposal.matchedVendors + " of " + proposal.totalVendors + " vendors matched, " + proposal.unresolvedItemCount +
     " item(s) across " + proposal.categoriesWithFindings + " categor" + (proposal.categoriesWithFindings === 1 ? "y" : "ies") + ".";
 
-  let html = "<div style='margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #3a3d45;'>";
-  html += "<div style='color:#f0b429;margin-bottom:6px;'>" + mentorGstEscapeHtml(message) + " The summary below still reflects the LAST generation.</div>";
-  html += "<button onclick='mentorAcceptGstReconciliation()' style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Regenerate the sheets</button>";
-  html += "<button onclick='mentorDismissGstReconciliation()' style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Not now</button>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line);\">";
+  html += "<div style='color:#8A5C10;margin-bottom:6px;'>" + mentorGstEscapeHtml(message) + " The summary below still reflects the LAST generation.</div>";
+  html += "<button onclick='mentorAcceptGstReconciliation()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--green-bg);color:var(--green);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Regenerate the sheets</button>";
+  html += "<button onclick='mentorDismissGstReconciliation()' style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Not now</button>";
   html += "</div>";
   return html;
 }
@@ -704,9 +718,9 @@ function mentorRenderGstTopIssuesList() {
 
   if (mentorGstTopIssues.length === 0) {
     container.innerHTML =
-      "<div style='background:#1a1a2e;border-left:4px solid #28a745;padding:8px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;'>" +
+      "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid var(--green);padding:8px 10px;border-radius:6px;font-size:11px;color:var(--ink-soft);\">" +
       banner +
-      mentorGstEscapeHtml(mentorGstConfirmationPreamble) +
+      mentorGstConfirmationPreamble + // built entirely from our own fixed strings + numeric fields (see the two assignment sites) — never contains sheet names or other user-controlled text, so it's safe to embed the trusted <span class='mentor-mono'> markup it carries
       " No issues found — every vendor matched and no line items were flagged." +
       mentorRenderIneligibleItcSuggestionSectionHtml() +
       "</div>";
@@ -716,29 +730,29 @@ function mentorRenderGstTopIssuesList() {
 
   const visibleCount = mentorGstTopIssuesShowAll ? mentorGstTopIssues.length : Math.min(MENTOR_GST_TOP_ISSUES_HEADLINE_COUNT, mentorGstTopIssues.length);
 
-  let html = "<div style='background:#1a1a2e;border-left:4px solid #28a745;padding:8px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;'>";
+  let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid var(--green);padding:8px 10px;border-radius:6px;font-size:11px;color:var(--ink-soft);\">";
   html += banner;
   if (mentorGstSelectIssueError) {
     html +=
-      "<div style='background:#3a1f24;border-left:3px solid #dc3545;padding:5px 8px;border-radius:4px;margin-bottom:6px;color:#f0b4bb;'>" +
+      "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:var(--red-bg);border-left:3px solid var(--red);padding:5px 8px;border-radius:4px;margin-bottom:6px;color:var(--red);\">" +
       mentorGstEscapeHtml(mentorGstSelectIssueError) +
       "</div>";
   }
-  html += mentorGstEscapeHtml(mentorGstConfirmationPreamble) + "<br/>";
-  html += "<div style='margin-top:6px;color:#9aa0a6;'>Top issues (highest priority, then largest rupee amount, first):</div>";
+  html += mentorGstConfirmationPreamble + "<br/>"; // trusted HTML — see the note at the other mentorGstConfirmationPreamble render site above
+  html += "<div class='mentor-label' style=\"font-family:'JetBrains Mono','Consolas',monospace;text-transform:uppercase;letter-spacing:0.04em;font-size:10px;color:var(--ink-soft);margin-top:8px;\">Top issues (highest priority, then largest rupee amount, first)</div>";
   html += "<ol style='margin:6px 0 6px 0;padding-left:16px;'>";
   for (let i = 0; i < visibleCount; i++) {
     const issue = mentorGstTopIssues[i];
     html +=
-      "<li style='margin-bottom:4px;cursor:pointer;color:#fff;' onclick='mentorGstSelectIssue(" + i + ")' title='" + mentorGstEscapeHtml(MENTOR_GST_TIER_LABEL[issue.tier] + " — click to select this row on \"" + issue.sheetName + "\"") + "'>" +
-      "<strong>" + mentorGstFormatAmount(issue.amount) + "</strong> — " + mentorGstEscapeHtml(issue.reason) +
-      " <span style='color:#7d828a;'>(" + mentorGstEscapeHtml(issue.sheetName) + ")</span></li>";
+      "<li style=\"margin-bottom:4px;cursor:pointer;color:var(--ink);font-family:'Inter','Segoe UI',sans-serif;\" onclick='mentorGstSelectIssue(" + i + ")' title='" + mentorGstEscapeHtml(MENTOR_GST_TIER_LABEL[issue.tier] + " — click to select this row on \"" + issue.sheetName + "\"") + "'>" +
+      "<strong class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;\">" + mentorGstEscapeHtml(mentorGstFormatAmountWithBreakdown(issue)) + "</strong> — " + mentorGstEscapeHtml(issue.reason) +
+      " <span class='mentor-mono' style=\"color:var(--ink-soft);font-family:'JetBrains Mono','Consolas',monospace;\">(" + mentorGstEscapeHtml(issue.sheetName) + ")</span></li>";
   }
   html += "</ol>";
   if (mentorGstTopIssues.length > MENTOR_GST_TOP_ISSUES_HEADLINE_COUNT) {
     html += mentorGstTopIssuesShowAll
-      ? "<a href='#' onclick='mentorGstToggleShowAllIssues(); return false;' style='color:#8ab4f8;font-size:11px;'>Show top " + MENTOR_GST_TOP_ISSUES_HEADLINE_COUNT + " only</a>"
-      : "<a href='#' onclick='mentorGstToggleShowAllIssues(); return false;' style='color:#8ab4f8;font-size:11px;'>Show all " + mentorGstTopIssues.length + "</a>";
+      ? "<a href='#' onclick='mentorGstToggleShowAllIssues(); return false;' style=\"font-family:'Inter','Segoe UI',sans-serif;color:#0B72B9;font-size:11px;\">Show top " + MENTOR_GST_TOP_ISSUES_HEADLINE_COUNT + " only</a>"
+      : "<a href='#' onclick='mentorGstToggleShowAllIssues(); return false;' style=\"font-family:'Inter','Segoe UI',sans-serif;color:#0B72B9;font-size:11px;\">Show all " + mentorGstTopIssues.length + "</a>";
   }
   html += mentorRenderIneligibleItcSuggestionSectionHtml();
   html += "</div>";
@@ -842,7 +856,7 @@ window.mentorAcceptGstReconciliation = async function () {
 
   const actionVerb = proposal.alreadyGenerated ? "Regenerating" : "Generating";
   const container = document.getElementById("mentor-gst-reconciliation-prompt");
-  if (container) container.innerHTML = "<div style='color:#9aa0a6;font-size:11px;padding:6px 0;'>" + actionVerb + " the review sheets…</div>";
+  if (container) container.innerHTML = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;color:var(--ink-soft);font-size:11px;padding:6px 0;\">" + actionVerb + " the review sheets…</div>";
 
   try {
     let summary = null;
@@ -901,8 +915,8 @@ window.mentorAcceptGstReconciliation = async function () {
     mentorGstTopIssues = topIssues;
     mentorGstTopIssuesShowAll = false; // always start collapsed to the headline top-5 on a fresh (re)generation
     mentorGstConfirmationPreamble =
-      "Reconciliation complete — " + proposal.unresolvedItemCount + " item(s) flagged across " + proposal.categoriesWithFindings + " categories" +
-      " (Priority 1 threshold: RCM/Ineligible ITC items ≥ " + mentorGstFormatAmount(materialityThreshold) + ")." + preservationLine;
+      "Reconciliation complete — <span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;\">" + proposal.unresolvedItemCount + "</span> item(s) flagged across " + proposal.categoriesWithFindings + " categories" +
+      " (Priority 1 threshold: RCM/Ineligible ITC items ≥ <span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;\">" + mentorGstFormatAmount(materialityThreshold) + "</span>)." + preservationLine;
 
     mentorGstSetupIneligibleItcVendorTrigger(proposal);
     mentorPendingGstProposal = null; // just written — nothing pending to regenerate
@@ -912,7 +926,7 @@ window.mentorAcceptGstReconciliation = async function () {
   } catch (error) {
     console.error("MENTOR GST reconciliation: failed to write report sheets", error);
     if (container) {
-      container.innerHTML = "<div style='background:#1a1a2e;border-left:4px solid #dc3545;padding:8px 10px;border-radius:6px;font-size:11px;color:#cfd2d8;'>Something went wrong generating the review sheets: " + mentorGstEscapeHtml(error.message) + "</div>";
+      container.innerHTML = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid var(--red);padding:8px 10px;border-radius:6px;font-size:11px;color:var(--ink-soft);\">Something went wrong generating the review sheets: " + mentorGstEscapeHtml(error.message) + "</div>";
     }
   }
 

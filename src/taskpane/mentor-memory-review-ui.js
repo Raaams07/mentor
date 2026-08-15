@@ -98,19 +98,26 @@ function mentorRenderMemoryReviewPanel() {
   if (toggle) toggle.textContent = "Learned answers (" + totalCount + ")";
 
   if (totalCount === 0) {
-    container.innerHTML = "<div style='color:#c2c6cc; font-size:11px;'>Nothing learned yet for this workbook.</div>";
+    container.innerHTML = "<div style=\"font-family:'Inter','Segoe UI',sans-serif; color:var(--ink-soft); font-size:11px;\">Nothing learned yet for this workbook.</div>";
     return;
   }
 
   let html = "";
   if (mentorMemoryReviewSheetRecords.length > 0) {
-    html += "<div style='font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin:6px 0 4px;'>Sheet identities</div>";
+    // "Sheet identities" plays the exact role mentor_landing.html's
+    // .ledger-head (SUPPLIER / INVOICE / AMOUNT / STATUS) plays — a small
+    // caption sitting above a list of rows — so it takes that style
+    // verbatim (JetBrains Mono, uppercase, letter-spacing 0.04em), not the
+    // Space Grotesk heading style, which is reserved for true headings.
+    html += "<div class='mentor-label' style=\"font-family:'JetBrains Mono','Consolas',monospace;font-size:10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;margin:6px 0 4px;\">Sheet identities</div>";
+    html += "<div style=\"font-family:'Inter','Segoe UI',sans-serif;color:var(--ink-soft);font-size:10px;margin:-2px 0 6px;\">Recognized. Won't ask again.</div>";
     mentorMemoryReviewSheetRecords.forEach((r) => {
       html += mentorRenderSheetMemoryReviewRow(r);
     });
   }
   if (mentorMemoryReviewColumnRecords.length > 0) {
-    html += "<div style='font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 4px;'>Column mappings</div>";
+    html += "<div class='mentor-label' style=\"font-family:'JetBrains Mono','Consolas',monospace;font-size:10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;margin:10px 0 4px;\">Column mappings</div>";
+    html += "<div style=\"font-family:'Inter','Segoe UI',sans-serif;color:var(--ink-soft);font-size:10px;margin:-2px 0 6px;\">Columns matched to their fields.</div>";
     mentorMemoryReviewColumnRecords.forEach((r) => {
       html += mentorRenderColumnMemoryReviewRow(r);
     });
@@ -118,12 +125,21 @@ function mentorRenderMemoryReviewPanel() {
   container.innerHTML = html;
 }
 
-// color:#fff is load-bearing, not decorative — this dark background never
-// had an explicit text color, so every row's text was falling back to the
-// browser default (black), nearly invisible against #1e2129. Individual
-// elements that set their own lighter/muted color (e.g. the ":#9aa0a6"
-// sheet-name label, ":#c2c6cc" field labels) still correctly override this.
-const MENTOR_MEMORY_REVIEW_ROW_STYLE = "padding:6px;margin-bottom:4px;border:1px solid #2a2d35;border-radius:4px;background:#1e2129;color:#fff;";
+// font-family + color:var(--ink) are load-bearing, not decorative — this
+// card background never had either set explicitly, so every row's text was
+// falling back to the browser default. Individual elements that set their
+// own font/color (e.g. the mono ":var(--ink-soft)" sheet-name label) still
+// correctly override this.
+//
+// Padding/border-radius/margin-bottom deliberately mirror mentor_landing.html's
+// .card (border:1px solid var(--line);border-radius:10px;padding:26px;
+// background:#fff — scaled down for the sidebar's ~360px width and 11-13px
+// text) so each sheet-identity/shape record reads as its own distinct card,
+// not a continuous run of text — the 12px margin-bottom is what actually
+// separates one record from the next; a record's own internal element
+// spacing (margin-bottom:4px between its own fields, etc.) is unrelated and
+// left as-is.
+const MENTOR_MEMORY_REVIEW_ROW_STYLE = "font-family:'Inter','Segoe UI',sans-serif;padding:14px;margin-bottom:12px;border:1px solid var(--line);border-radius:8px;background:#FFFFFF;color:var(--ink);";
 
 function mentorRenderSheetMemoryReviewRow(record) {
   const sig = record.structural_signature;
@@ -141,8 +157,8 @@ function mentorRenderSheetMemoryReviewRow(record) {
       "\"? MENTOR will ask again next time it sees a sheet with this shape.</div>" +
       "<button onclick=\"mentorConfirmForgetSheetMemory('" +
       sig +
-      "')\" style='margin-right:6px;padding:3px 10px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Yes, forget it</button>" +
-      "<button onclick=\"mentorCancelMemoryReviewAction()\" style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Cancel</button>" +
+      "')\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--red);color:#FFFFFF;border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Yes, forget it</button>" +
+      "<button onclick=\"mentorCancelMemoryReviewAction()\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Cancel</button>" +
       "</div>"
     );
   }
@@ -152,19 +168,19 @@ function mentorRenderSheetMemoryReviewRow(record) {
       "<div style='" +
       MENTOR_MEMORY_REVIEW_ROW_STYLE +
       "'>" +
-      "<div style='color:#9aa0a6;font-size:11px;margin-bottom:4px;'>'" +
+      "<div class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);font-size:11px;margin-bottom:4px;\">'" +
       mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) +
       "'</div>" +
       "<input id='mentor-memory-review-edit-input' type='text' value=\"" +
       mentorMemoryReviewEscapeHtml(record.user_provided_label) +
-      "\" style='width:100%;box-sizing:border-box;padding:5px 7px;border-radius:4px;border:1px solid #444;background:#22252b;color:#fff;font-size:12px;margin-bottom:6px;' " +
+      "\" style=\"font-family:'Inter','Segoe UI',sans-serif;width:100%;box-sizing:border-box;padding:5px 7px;border-radius:4px;border:1px solid var(--line);background:#FFFFFF;color:var(--ink);font-size:12px;margin-bottom:6px;\" " +
       "onkeydown='if(event.key===\"Enter\"){mentorSaveSheetMemoryReviewEdit(\"" +
       sig +
       "\");}' />" +
       "<button onclick=\"mentorSaveSheetMemoryReviewEdit('" +
       sig +
-      "')\" style='margin-right:6px;padding:3px 10px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Save</button>" +
-      "<button onclick=\"mentorCancelMemoryReviewAction()\" style='padding:3px 10px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;'>Cancel</button>" +
+      "')\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-right:6px;padding:3px 10px;background:var(--green-bg);color:var(--green);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Save</button>" +
+      "<button onclick=\"mentorCancelMemoryReviewAction()\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:3px 10px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:11px;\">Cancel</button>" +
       "</div>"
     );
   }
@@ -173,7 +189,7 @@ function mentorRenderSheetMemoryReviewRow(record) {
     "<div style='" +
     MENTOR_MEMORY_REVIEW_ROW_STYLE +
     "'>" +
-    "<div><strong>" +
+    "<div><strong class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;\">" +
     mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) +
     "</strong> — \"" +
     mentorMemoryReviewEscapeHtml(record.user_provided_label) +
@@ -181,10 +197,10 @@ function mentorRenderSheetMemoryReviewRow(record) {
     "<div style='margin-top:4px;'>" +
     "<a href=\"#\" onclick=\"mentorStartSheetMemoryReviewEdit('" +
     sig +
-    "'); return false;\" style='font-size:11px;color:#9b59d0;text-decoration:underline;margin-right:10px;'>Edit</a>" +
+    "'); return false;\" style=\"font-family:'Inter','Segoe UI',sans-serif;font-size:11px;color:#9b59d0;text-decoration:underline;margin-right:10px;\">Edit</a>" +
     "<a href=\"#\" onclick=\"mentorStartMemoryReviewConfirmResetSheet('" +
     sig +
-    "'); return false;\" style='font-size:11px;color:#dc3545;text-decoration:underline;'>Reset</a>" +
+    "'); return false;\" style=\"font-family:'Inter','Segoe UI',sans-serif;font-size:11px;color:var(--red);text-decoration:underline;\">Reset</a>" +
     "</div></div>"
   );
 }
@@ -194,7 +210,8 @@ function mentorRenderColumnMemoryReviewRow(record) {
   const state = mentorMemoryReviewUiState;
 
   let html = "<div style='" + MENTOR_MEMORY_REVIEW_ROW_STYLE + "'>";
-  html += "<div style='color:#9aa0a6;font-size:11px;margin-bottom:4px;'>'" + mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) + "' shape</div>";
+  html += "<div class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);font-size:11px;margin-bottom:2px;\">'" + mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) + "' shape</div>";
+  html += "<div style=\"font-family:'Inter','Segoe UI',sans-serif;color:var(--ink-soft);font-size:10px;margin-bottom:4px;\">Same layout recognized.</div>";
 
   Object.keys(record.fields).forEach((field) => {
     if (state && state.kind === "confirm-reset-column-field" && state.sig === sig && state.field === field) {
@@ -208,16 +225,16 @@ function mentorRenderColumnMemoryReviewRow(record) {
         sig +
         "','" +
         field +
-        "')\" style='margin-left:4px;margin-right:4px;padding:2px 8px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;font-size:10px;'>Yes</button>" +
-        "<button onclick=\"mentorCancelMemoryReviewAction()\" style='padding:2px 8px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:10px;'>Cancel</button></div>";
+        "')\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-left:4px;margin-right:4px;padding:2px 8px;background:var(--red);color:#FFFFFF;border:none;border-radius:4px;cursor:pointer;font-size:10px;\">Yes</button>" +
+        "<button onclick=\"mentorCancelMemoryReviewAction()\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:2px 8px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:10px;\">Cancel</button></div>";
     } else if (state && state.kind === "edit-column-field" && state.sig === sig && state.field === field) {
       html +=
-        "<div style='margin-bottom:4px;'><span style='color:#c2c6cc;'>" +
+        "<div style='margin-bottom:4px;'><span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);\">" +
         field +
         ":</span> " +
         "<input id='mentor-memory-review-edit-input' type='text' value=\"" +
         mentorMemoryReviewEscapeHtml(record.fields[field]) +
-        "\" style='width:55%;box-sizing:border-box;padding:3px 5px;border-radius:4px;border:1px solid #444;background:#22252b;color:#fff;font-size:11px;' " +
+        "\" class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;width:55%;box-sizing:border-box;padding:3px 5px;border-radius:4px;border:1px solid var(--line);background:#FFFFFF;color:var(--ink);font-size:11px;\" " +
         "onkeydown='if(event.key===\"Enter\"){mentorSaveColumnMemoryReviewEdit(\"" +
         sig +
         "\",\"" +
@@ -227,11 +244,11 @@ function mentorRenderColumnMemoryReviewRow(record) {
         sig +
         "','" +
         field +
-        "')\" style='padding:2px 8px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:10px;'>Save</button> " +
-        "<button onclick=\"mentorCancelMemoryReviewAction()\" style='padding:2px 8px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:10px;'>Cancel</button></div>";
+        "')\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:2px 8px;background:var(--green-bg);color:var(--green);border:none;border-radius:4px;cursor:pointer;font-size:10px;\">Save</button> " +
+        "<button onclick=\"mentorCancelMemoryReviewAction()\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:2px 8px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:10px;\">Cancel</button></div>";
     } else {
       html +=
-        "<div style='margin-bottom:4px;'>" +
+        "<div class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;margin-bottom:4px;color:var(--ink);\">" +
         field +
         " → \"" +
         mentorMemoryReviewEscapeHtml(record.fields[field]) +
@@ -240,12 +257,12 @@ function mentorRenderColumnMemoryReviewRow(record) {
         sig +
         "','" +
         field +
-        "'); return false;\" style='font-size:11px;color:#9b59d0;text-decoration:underline;margin-left:6px;'>Edit</a> " +
+        "'); return false;\" style=\"font-family:'Inter','Segoe UI',sans-serif;font-size:11px;color:#9b59d0;text-decoration:underline;margin-left:6px;\">Edit</a> " +
         "<a href=\"#\" onclick=\"mentorStartMemoryReviewConfirmResetColumnField('" +
         sig +
         "','" +
         field +
-        "'); return false;\" style='font-size:11px;color:#dc3545;text-decoration:underline;margin-left:6px;'>Reset</a></div>";
+        "'); return false;\" style=\"font-family:'Inter','Segoe UI',sans-serif;font-size:11px;color:var(--red);text-decoration:underline;margin-left:6px;\">Reset</a></div>";
     }
   });
 
@@ -254,10 +271,10 @@ function mentorRenderColumnMemoryReviewRow(record) {
       "<div style='margin-top:4px;'>Forget ALL column mappings learned for this sheet shape? " +
       "<button onclick=\"mentorConfirmForgetColumnRecord('" +
       sig +
-      "')\" style='margin-left:4px;margin-right:4px;padding:2px 8px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;font-size:10px;'>Yes</button>" +
-      "<button onclick=\"mentorCancelMemoryReviewAction()\" style='padding:2px 8px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;font-size:10px;'>Cancel</button></div>";
+      "')\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;margin-left:4px;margin-right:4px;padding:2px 8px;background:var(--red);color:#FFFFFF;border:none;border-radius:4px;cursor:pointer;font-size:10px;\">Yes</button>" +
+      "<button onclick=\"mentorCancelMemoryReviewAction()\" style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;padding:2px 8px;background:var(--ink-soft);color:var(--paper);border:none;border-radius:4px;cursor:pointer;font-size:10px;\">Cancel</button></div>";
   } else {
-    html += "<a href=\"#\" onclick=\"mentorStartMemoryReviewConfirmResetColumnRecord('" + sig + "'); return false;\" style='font-size:11px;color:#dc3545;text-decoration:underline;'>Reset all for this shape</a>";
+    html += "<a href=\"#\" onclick=\"mentorStartMemoryReviewConfirmResetColumnRecord('" + sig + "'); return false;\" style=\"font-family:'Inter','Segoe UI',sans-serif;font-size:11px;color:var(--red);text-decoration:underline;\">Reset all for this shape</a>";
   }
 
   html += "</div>";
@@ -293,7 +310,7 @@ window.mentorSaveSheetMemoryReviewEdit = async function (sig) {
   const input = document.getElementById("mentor-memory-review-edit-input");
   const value = input ? input.value.trim() : "";
   if (!value) {
-    if (input) input.style.border = "1px solid #dc3545";
+    if (input) input.style.border = "1px solid var(--red)";
     return;
   }
 
@@ -352,7 +369,7 @@ window.mentorSaveColumnMemoryReviewEdit = async function (sig, field) {
   const input = document.getElementById("mentor-memory-review-edit-input");
   const value = input ? input.value.trim() : "";
   if (!value) {
-    if (input) input.style.border = "1px solid #dc3545";
+    if (input) input.style.border = "1px solid var(--red)";
     return;
   }
 

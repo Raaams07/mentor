@@ -4,12 +4,50 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MENTOR</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Design system copied verbatim from mentor_landing.html (:root vars,
+       font stack, .mentor-label = that file's .ledger-head) so the sidebar
+       and the landing page are provably the same system, not two hand-
+       matched palettes. .mentor-heading: true headings/wordmark (Space
+       Grotesk). .mentor-label: small uppercase section/column-header
+       captions, e.g. "Sheet identities" — the sidebar equivalent of the
+       landing page's "SUPPLIER / INVOICE / AMOUNT / STATUS" row (JetBrains
+       Mono). .mentor-mono: data content — amounts, GSTIN, sheet/column
+       names, row counts (JetBrains Mono, tabular figures). Every element
+       below also sets its own font-family/color inline, redundant with
+       these classes on purpose — relying on the class alone (nothing else
+       overriding it) was exactly how the tagline previously fell back to
+       the system font silently; inline + class means there's no single
+       point of failure. -->
+  <style>
+    :root {
+      --paper: #F7F5F0;
+      --ink: #1B1B18;
+      --ink-soft: #5B584F;
+      --green: #1F4D3A;
+      --green-bg: #E4EFE7;
+      --red: #C4453D;
+      --red-bg: #FBEAE8;
+      --line: #DEDAD0;
+    }
+    body { font-family: 'Inter', 'Segoe UI', sans-serif; }
+    .mentor-heading { font-family: 'Space Grotesk', 'Segoe UI', sans-serif; }
+    .mentor-label { font-family: 'JetBrains Mono', 'Consolas', monospace; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
+    .mentor-mono { font-family: 'JetBrains Mono', 'Consolas', monospace; font-variant-numeric: tabular-nums; }
+  </style>
 </head>
-<body style="font-family:Segoe UI, sans-serif; padding:18px; font-size:13px; background:#f7f8fa;">
+<body style="font-family:'Inter','Segoe UI',sans-serif; padding:18px; font-size:13px; background:var(--paper); color:var(--ink);">
 
-  <!-- MENTOR — calm, quiet presence. No inputs, no buttons, nothing to fill in. -->
-  <h2 style="color:#1a1a2e; margin:0 0 6px 0; font-weight:600;">MENTOR</h2>
-  <p style="color:#9aa0a6; font-size:11px; letter-spacing:0.5px; text-transform:uppercase; margin:0 0 20px 0;">
+  <!-- MENTOR — calm, quiet presence. No inputs, no buttons, nothing to fill in.
+       Styled like mentor_landing.html's .logo: Space Grotesk, weight 700,
+       18px, letter-spacing 0.02em. -->
+  <h2 class="mentor-heading" style="font-family:'Space Grotesk','Segoe UI',sans-serif; font-weight:700; font-size:18px; letter-spacing:0.02em; color:var(--ink); margin:0 0 6px 0;">MENTOR</h2>
+  <!-- Tagline — styled like the landing page header's mono caption beside
+       the logo ("for GST practitioners"): JetBrains Mono, 12px, ink-soft,
+       no uppercase/letter-spacing (the source caption has none). -->
+  <p class="mentor-mono" style="font-family:'JetBrains Mono','Consolas',monospace; font-size:12px; color:var(--ink-soft); margin:0 0 20px 0;">
     An expert always beside you.
   </p>
 
@@ -29,7 +67,7 @@
   <div id="mentor-suggestion"></div>
 
   <!-- Calm resting state — small, quiet, not a call-to-action -->
-  <div id="mentor-empty-state" style="color:#c2c6cc; font-size:11px; margin-top:4px;">
+  <div id="mentor-empty-state" style="font-family:'Inter','Segoe UI',sans-serif; color:var(--ink-soft); font-size:11px; margin-top:4px;">
     &nbsp;
   </div>
 
@@ -37,27 +75,32 @@
   <div id="results"></div>
 
   <!-- MENTOR action history — a permanent, visible log of everything
-       MENTOR has actually done, so it's never a mystery what happened. -->
-  <div style="margin-top:24px; border-top:1px solid #e2e4e9; padding-top:10px;">
-    <a href="#" id="mentor-history-toggle" onclick="mentorToggleHistory(); return false;"
-       style="font-size:11px; color:#888; text-decoration:underline; cursor:pointer;">
+       MENTOR has actually done, so it's never a mystery what happened.
+       Toggle styled like the landing page's .ledger-head column labels
+       (SUPPLIER / INVOICE / AMOUNT / STATUS): JetBrains Mono, uppercase,
+       10px, ink-soft, letter-spacing 0.04em — this IS a section header
+       sitting above a list of rows, the same role .ledger-head plays. -->
+  <div style="margin-top:24px; border-top:1px solid var(--line); padding-top:10px;">
+    <a href="#" id="mentor-history-toggle" onclick="mentorToggleHistory(); return false;" class="mentor-label"
+       style="font-family:'JetBrains Mono','Consolas',monospace; text-transform:uppercase; letter-spacing:0.04em; font-size:10px; color:var(--ink-soft); text-decoration:underline; cursor:pointer;">
       History (0)
     </a>
     <div id="mentor-history-list" style="display:none; margin-top:8px;">
-      <div style="color:#c2c6cc; font-size:11px;">Nothing done yet.</div>
+      <div style="font-family:'Inter','Segoe UI',sans-serif; color:var(--ink-soft); font-size:11px;">Nothing done yet.</div>
     </div>
   </div>
 
   <!-- What MENTOR has learned for this workbook (sheet identities, column
        mappings) — reviewable and editable/resettable directly here, no
        need to unhide the underlying memory sheets. -->
-  <div style="margin-top:10px; border-top:1px solid #e2e4e9; padding-top:10px;">
-    <a href="#" id="mentor-memory-review-toggle" onclick="mentorToggleMemoryReview(); return false;"
-       style="font-size:11px; color:#888; text-decoration:underline; cursor:pointer;">
+  <div style="margin-top:10px; border-top:1px solid var(--line); padding-top:10px;">
+    <a href="#" id="mentor-memory-review-toggle" onclick="mentorToggleMemoryReview(); return false;" class="mentor-label"
+       style="font-family:'JetBrains Mono','Consolas',monospace; text-transform:uppercase; letter-spacing:0.04em; font-size:10px; color:var(--ink-soft); text-decoration:underline; cursor:pointer;">
       Learned answers (0)
     </a>
+    <div style="font-family:'Inter','Segoe UI',sans-serif; color:var(--ink-soft); font-size:10px; margin-top:2px;">Remembered — edit anytime.</div>
     <div id="mentor-memory-review-list" style="display:none; margin-top:8px;">
-      <div style="color:#c2c6cc; font-size:11px;">Nothing learned yet for this workbook.</div>
+      <div style="font-family:'Inter','Segoe UI',sans-serif; color:var(--ink-soft); font-size:11px;">Nothing learned yet for this workbook.</div>
     </div>
   </div>
 
