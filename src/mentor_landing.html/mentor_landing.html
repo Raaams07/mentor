@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MENTOR — GST reconciliation, without the tab-hopping</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F7F5F0;
+    --ink:#1B1B18;
+    --ink-soft:#5B584F;
+    --green:#1F4D3A;
+    --green-bg:#E4EFE7;
+    --red:#C4453D;
+    --red-bg:#FBEAE8;
+    --line:#DEDAD0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif;font-weight:500;letter-spacing:-0.01em;}
+  .mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
+  a{color:inherit;}
+
+  header{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:28px 48px;max-width:1180px;margin:0 auto;
+  }
+  .logo{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;letter-spacing:0.02em;}
+  .logo span{color:var(--green);}
+
+  .hero{
+    max-width:1180px;margin:0 auto;padding:64px 48px 40px;
+    display:grid;grid-template-columns:1.1fr 1fr;gap:56px;align-items:center;
+  }
+  .eyebrow{
+    font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);
+    text-transform:uppercase;letter-spacing:0.08em;margin-bottom:18px;
+  }
+  h1{font-size:44px;line-height:1.12;margin-bottom:20px;}
+  .sub{font-size:17px;color:var(--ink-soft);max-width:460px;margin-bottom:32px;}
+
+  .cta-row{display:flex;gap:0;max-width:420px;border:1.5px solid var(--ink);border-radius:6px;overflow:hidden;}
+  .cta-row input{
+    flex:1;border:none;background:transparent;padding:14px 16px;
+    font-family:'Inter',sans-serif;font-size:14px;color:var(--ink);outline:none;
+  }
+  .cta-row button{
+    border:none;background:var(--ink);color:var(--paper);
+    padding:14px 22px;font-family:'Space Grotesk',sans-serif;font-weight:500;
+    font-size:14px;cursor:pointer;white-space:nowrap;transition:background .15s ease;
+  }
+  .cta-row button:hover{background:var(--green);}
+  .cta-note{font-size:12px;color:var(--ink-soft);margin-top:10px;}
+
+  /* Ledger strip — signature element */
+  .ledger{
+    background:#fff;border:1px solid var(--line);border-radius:10px;
+    padding:18px 18px 14px;box-shadow:0 1px 0 rgba(0,0,0,0.02);
+  }
+  .ledger-head{
+    display:grid;grid-template-columns:1.3fr 1fr 1fr .9fr;
+    font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;
+    color:var(--ink-soft);letter-spacing:0.04em;padding:0 10px 10px;border-bottom:1px solid var(--line);
+  }
+  .ledger-row{
+    display:grid;grid-template-columns:1.3fr 1fr 1fr .9fr;align-items:center;
+    padding:11px 10px;border-radius:5px;font-family:'JetBrains Mono',monospace;font-size:12.5px;
+    margin-top:4px;transition:background .5s ease, color .5s ease;
+  }
+  .ledger-row span:first-child{font-family:'Inter',sans-serif;font-size:12.5px;color:var(--ink);}
+  .status{font-size:10.5px;font-family:'JetBrains Mono',monospace;padding:2px 7px;border-radius:20px;justify-self:start;}
+  .status.flagged{background:var(--red-bg);color:var(--red);}
+  .status.matched{background:var(--green-bg);color:var(--green);}
+  .ledger-row.will-resolve .status.flagged{animation:resolve 4s ease-in-out infinite;}
+  .ledger-row.will-resolve{animation:rowfade 4s ease-in-out infinite;}
+
+  @keyframes resolve{
+    0%,55%{opacity:1;}
+    60%{opacity:0;}
+    65%,100%{opacity:0;}
+  }
+  .ledger-row.will-resolve .status.matched{
+    opacity:0;position:absolute;
+  }
+  .ledger-row.will-resolve{position:relative;}
+  .ledger-row.will-resolve .status.matched{
+    animation:appear 4s ease-in-out infinite;
+  }
+  @keyframes appear{
+    0%,60%{opacity:0;}
+    65%,100%{opacity:1;}
+  }
+  .status-wrap{position:relative;height:20px;}
+  .status-wrap .status{position:absolute;left:0;top:0;}
+
+  .ledger--dark .ledger-row span:first-child{color:#E9E7DF;}
+  .ledger--dark .ledger-row{color:#E9E7DF;}
+
+  .ledger-foot{
+    display:flex;justify-content:space-between;align-items:center;
+    margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+    font-size:11px;color:var(--ink-soft);font-family:'JetBrains Mono',monospace;
+  }
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:6px;}
+
+  section{max-width:1180px;margin:0 auto;padding:64px 48px;}
+  .divider{max-width:1180px;margin:0 auto;border:none;border-top:1px solid var(--line);}
+
+  .problem{max-width:640px;}
+  .problem h2{font-size:26px;margin-bottom:16px;}
+  .problem p{color:var(--ink-soft);font-size:16px;}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:40px;}
+  .card{border:1px solid var(--line);border-radius:10px;padding:26px;background:#fff;}
+  .card .tag{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;}
+  .card h3{font-size:17px;margin-bottom:8px;}
+  .card p{font-size:14px;color:var(--ink-soft);}
+
+  .why{
+    background:var(--ink);color:var(--paper);border-radius:14px;
+    padding:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center;
+  }
+  .why h2{font-size:24px;margin-bottom:14px;color:var(--paper);}
+  .why p{color:#C9C6BC;font-size:15px;}
+  .why .stat{font-family:'JetBrains Mono',monospace;font-size:13px;color:#9FD6B4;border-top:1px solid #3A3A34;padding-top:16px;margin-top:20px;}
+
+  .final{text-align:center;padding:80px 48px;}
+  .final h2{font-size:30px;margin-bottom:14px;}
+  .final .cta-row{margin:0 auto;}
+  .final .cta-note{margin-top:12px;}
+
+  footer{
+    max-width:1180px;margin:0 auto;padding:28px 48px 48px;
+    display:flex;justify-content:space-between;color:var(--ink-soft);font-size:13px;
+    border-top:1px solid var(--line);
+  }
+
+  @media(max-width:860px){
+    .hero{grid-template-columns:1fr;padding-top:40px;}
+    .grid3{grid-template-columns:1fr;}
+    .why{grid-template-columns:1fr;padding:32px;}
+    h1{font-size:32px;}
+    header,section,footer{padding-left:24px;padding-right:24px;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">MENTOR<span>.</span></div>
+  <div class="mono" style="font-size:12px;color:var(--ink-soft);">for GST practitioners</div>
+</header>
+
+<div class="hero">
+  <div>
+    <div class="eyebrow">// currently in testing</div>
+    <h1>GST reconciliation, without the tab-hopping.</h1>
+    <p class="sub">MENTOR reads your GSTR-2A and Books, finds what doesn't match, and explains exactly why — right inside Excel.</p>
+    <form class="cta-row" action="https://formspree.io/f/xzepvllz" method="POST" onsubmit="mentorSubmitSignup(event, '');">
+      <input type="email" name="email" placeholder="you@firm.com" required>
+      <button type="submit">Notify me</button>
+    </form>
+    <p id="confirm" style="display:none;font-size:14px;color:var(--green);font-family:'JetBrains Mono',monospace;">✓ You're on the list.</p>
+    <p id="error" style="display:none;font-size:14px;color:var(--red);font-family:'JetBrains Mono',monospace;">Something went wrong — please try again.</p>
+    <p class="cta-note">No account. No spam. One email when it's ready.</p>
+  </div>
+
+  <div class="ledger">
+    <div class="ledger-head">
+      <span>Supplier</span><span>Invoice</span><span>Amount</span><span>Status</span>
+    </div>
+    <div class="ledger-row">
+      <span>Vendor A Traders</span><span>INV-1042</span><span>₹1,62,463</span>
+      <span class="status matched">matched</span>
+    </div>
+    <div class="ledger-row will-resolve">
+      <span>Vendor B Enterprises</span><span>INV-0684</span><span>₹1,13,201</span>
+      <span class="status-wrap">
+        <span class="status flagged">flagged — duplicate</span>
+        <span class="status matched">resolved</span>
+      </span>
+    </div>
+    <div class="ledger-row">
+      <span>Vendor C Industries</span><span>INV-2201</span><span>₹1,67,286</span>
+      <span class="status matched">matched</span>
+    </div>
+    <div class="ledger-row">
+      <span>Vendor D Tube Co.</span><span>INV-1997</span><span>₹61,875</span>
+      <span class="status matched">matched</span>
+    </div>
+    <div class="ledger-foot">
+      <span><span class="dot"></span>26 items reviewed</span>
+      <span>Net eligible ITC: ₹22,15,124</span>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<section class="problem">
+  <h2>The manual grind, every month</h2>
+  <p>Open GSTR-2A. Open Books. Flip between tabs. Try to catch mismatched invoices, missed entries, and RCM items by eye — hoping nothing slips through. One column mix-up, one overlooked duplicate, and a real ITC claim is at risk.</p>
+</section>
+
+<section style="padding-top:0;">
+  <h2 style="font-size:22px;margin-bottom:6px;">What MENTOR actually does</h2>
+  <div class="grid3">
+    <div class="card">
+      <div class="tag">match</div>
+      <h3>Line-by-line reconciliation</h3>
+      <p>GSTR-2A against your Books, matched automatically — not eyeballed across two tabs.</p>
+    </div>
+    <div class="card">
+      <div class="tag">flag</div>
+      <h3>Confidence-sorted discrepancies</h3>
+      <p>Extra in Books, extra in 2A, mismatches — split by confidence, not dumped in one pile.</p>
+    </div>
+    <div class="card">
+      <div class="tag">explain</div>
+      <h3>A reason for every flag</h3>
+      <p>Not just "this is wrong" — why, and which section of GST law it relates to.</p>
+    </div>
+    <div class="card">
+      <div class="tag">remember</div>
+      <h3>Learns your file layout</h3>
+      <p>Recognizes your columns once — never re-asks the same question next month.</p>
+    </div>
+    <div class="card">
+      <div class="tag">catch</div>
+      <h3>Duplicate invoices</h3>
+      <p>Even when formatting or amounts differ slightly between the two counted entries.</p>
+    </div>
+    <div class="card">
+      <div class="tag">propose</div>
+      <h3>Never files anything on its own</h3>
+      <p>Every action is proposed. You review. You approve. Always.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="why">
+    <div>
+      <h2>Built by someone who did this by hand</h2>
+      <p>CA-trained, years of manual reconciliation — and the same avoidable mistakes every time: a mislabelled column, a duplicate counted twice, a row that didn't match what was actually in the sheet.</p>
+      <p class="stat">// MENTOR is what a sharp assistant catches — every file, without getting tired on the fourth one of the day.</p>
+    </div>
+    <div class="ledger ledger--dark" style="background:#232320;border-color:#3A3A34;">
+      <div class="ledger-head" style="border-color:#3A3A34;color:#9C9A90;">
+        <span>Check</span><span></span><span></span><span>Result</span>
+      </div>
+      <div class="ledger-row">
+        <span>Row-number mapping</span><span></span><span></span><span class="status matched">verified</span>
+      </div>
+      <div class="ledger-row">
+        <span>Duplicate invoice logic</span><span></span><span></span><span class="status matched">verified</span>
+      </div>
+      <div class="ledger-row">
+        <span>Column-memory persistence</span><span></span><span></span><span class="status matched">verified</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <h2>Be first to try it.</h2>
+  <p style="color:var(--ink-soft);max-width:420px;margin:0 auto 28px;">MENTOR is being tested against real reconciliation files right now. Leave your email and we'll let you know the moment it's ready.</p>
+  <form class="cta-row" action="https://formspree.io/f/xzepvllz" method="POST" onsubmit="mentorSubmitSignup(event, '2');">
+    <input type="email" name="email" placeholder="you@firm.com" required>
+    <button type="submit">Notify me</button>
+  </form>
+  <p id="confirm2" style="display:none;font-size:14px;color:var(--green);font-family:'JetBrains Mono',monospace;">✓ You're on the list.</p>
+  <p id="error2" style="display:none;font-size:14px;color:var(--red);font-family:'JetBrains Mono',monospace;">Something went wrong — please try again.</p>
+  <p class="cta-note">No account. No spam. One email when it's ready.</p>
+</section>
+
+<footer>
+  <span>MENTOR — built in the open</span>
+  <span>Currently in testing with real GST practitioners</span>
+</footer>
+
+<script>
+  // Shared by both signup forms (hero + final section). suffix distinguishes
+  // which confirm/error pair to toggle ('' for the hero form's #confirm/
+  // #error, '2' for the final section's #confirm2/#error2) — submits in the
+  // background via fetch() and only reveals the confirmation once Formspree
+  // actually responds successfully, rather than the old onsubmit that
+  // showed it immediately regardless of whether anything was ever sent.
+  async function mentorSubmitSignup(event, suffix) {
+    event.preventDefault();
+    const form = event.target;
+    const button = form.querySelector('button[type="submit"]');
+    const confirmEl = document.getElementById('confirm' + suffix);
+    const errorEl = document.getElementById('error' + suffix);
+
+    if (errorEl) errorEl.style.display = 'none';
+    const originalButtonText = button ? button.textContent : '';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Sending…';
+    }
+
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        headers: { Accept: 'application/json' },
+      });
+
+      if (response.ok) {
+        form.style.display = 'none';
+        if (confirmEl) confirmEl.style.display = 'block';
+      } else {
+        if (errorEl) errorEl.style.display = 'block';
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalButtonText;
+        }
+      }
+    } catch (networkError) {
+      if (errorEl) errorEl.style.display = 'block';
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalButtonText;
+      }
+    }
+  }
+</script>
+
+</body>
+</html>
