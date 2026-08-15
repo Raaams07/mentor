@@ -147,9 +147,9 @@ function mentorRenderSheetMemoryReviewRow(record) {
 
   if (state && state.kind === "confirm-reset-sheet" && state.sig === sig) {
     return (
-      "<div style='" +
+      "<div style=\"" +
       MENTOR_MEMORY_REVIEW_ROW_STYLE +
-      "'>" +
+      "\">" +
       "<div style='margin-bottom:6px;'>Forget that '" +
       mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) +
       "' is \"" +
@@ -165,9 +165,9 @@ function mentorRenderSheetMemoryReviewRow(record) {
 
   if (state && state.kind === "edit-sheet" && state.sig === sig) {
     return (
-      "<div style='" +
+      "<div style=\"" +
       MENTOR_MEMORY_REVIEW_ROW_STYLE +
-      "'>" +
+      "\">" +
       "<div class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);font-size:11px;margin-bottom:4px;\">'" +
       mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) +
       "'</div>" +
@@ -186,9 +186,9 @@ function mentorRenderSheetMemoryReviewRow(record) {
   }
 
   return (
-    "<div style='" +
+    "<div style=\"" +
     MENTOR_MEMORY_REVIEW_ROW_STYLE +
-    "'>" +
+    "\">" +
     "<div><strong class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;\">" +
     mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) +
     "</strong> — \"" +
@@ -209,7 +209,7 @@ function mentorRenderColumnMemoryReviewRow(record) {
   const sig = record.structural_signature;
   const state = mentorMemoryReviewUiState;
 
-  let html = "<div style='" + MENTOR_MEMORY_REVIEW_ROW_STYLE + "'>";
+  let html = "<div style=\"" + MENTOR_MEMORY_REVIEW_ROW_STYLE + "\">";
   html += "<div class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);font-size:11px;margin-bottom:2px;\">'" + mentorMemoryReviewEscapeHtml(record.sheet_name_at_creation) + "' shape</div>";
   html += "<div style=\"font-family:'Inter','Segoe UI',sans-serif;color:var(--ink-soft);font-size:10px;margin-bottom:4px;\">Same layout recognized.</div>";
 
