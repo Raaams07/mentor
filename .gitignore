@@ -38,3 +38,7 @@ server/.anthropic-api-key
 
 # Column-pattern (Tier 1 shared) memory local store (dev/test data, not source)
 server/data/
+
+# Vercel local project-link metadata (account/org/project IDs) — written if
+# `vercel link` is ever run locally; never committed
+.vercel/

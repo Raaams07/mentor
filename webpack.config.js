@@ -4,8 +4,16 @@ const devCerts = require("office-addin-dev-certs");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 
-const urlDev = "https://localhost:3000/";
-const urlProd = "https://www.contoso.com/"; // CHANGE THIS TO YOUR PRODUCTION DEPLOYMENT LOCATION
+// No trailing slash — manifest.xml uses this origin both bare (SupportUrl,
+// AppDomain, GetStarted.LearnMoreUrl) and with a path suffix
+// (SourceLocation, icon URLs). A bare-origin regex match correctly handles
+// both: it matches the exact bare-URL elements, AND matches as a prefix
+// inside the path-suffixed ones, leaving the suffix untouched. A version of
+// this constant WITH a trailing slash (as it originally shipped) only
+// matched the path-suffixed elements — silently leaving AppDomain and the
+// other bare-origin elements pointed at localhost in every production build.
+const urlDev = "https://localhost:3000";
+const urlProd = "https://mentor-gst.vercel.app"; // stable Vercel production alias (project: mentor-gst) — stays fixed across future redeploys
 
 async function getHttpsOptions() {
   const httpsOptions = await devCerts.getHttpsServerOptions();

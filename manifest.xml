@@ -5,7 +5,7 @@
   <ProviderName>MENTOR</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="MENTOR"/>
-  <Description DefaultValue="AI-powered finance data quality scanner. Detects duplicates, blank cells, and date format issues instantly."/>
+  <Description DefaultValue="Reconciles GSTR-2A against your Books, right inside Excel — matches invoices, flags mismatches and duplicates, and explains every finding. Nothing is filed automatically; you always review and approve."/>
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
   <SupportUrl DefaultValue="https://localhost:3000"/>
@@ -77,8 +77,8 @@
         <bt:String id="TaskpaneButton.Label" DefaultValue="Open MENTOR"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="MENTOR has loaded successfully. Click Open MENTOR to scan your sheet for duplicates, blank cells, and date issues."/>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open MENTOR - Finance Data Quality Scanner"/>
+        <bt:String id="GetStarted.Description" DefaultValue="MENTOR has loaded successfully. Click Open MENTOR, then select your GSTR-2A and Books sheets to run a reconciliation."/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open MENTOR - GST Reconciliation Assistant"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>
