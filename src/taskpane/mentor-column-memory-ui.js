@@ -69,6 +69,58 @@ function mentorColumnMemoryEscapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Duplicated locally rather than imported from mentor-gst-reconciliation-
+// ui.js (which already has an identical helper) — that file requires THIS
+// one, so importing the other way would be circular; matches this
+// codebase's existing convention of small trivial per-file helpers over a
+// shared util for one function.
+function mentorColumnMemoryDebounce(fn, ms) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+// Jumps the Excel view to a candidate column and selects it — the exact
+// same activate()+select() pattern mentorGstSelectIssue() already uses for
+// point-and-explain navigation on flagged rows. The one difference: a
+// candidate's index is relative to THIS sheet's used range at scan time,
+// which (unlike MENTOR's own generated report sheets) can start at a
+// different row/column than A1 on a real uploaded file — so this resolves
+// the column via usedRange.getColumn(index), relative to the used range's
+// own corner, rather than assuming/computing an absolute column letter.
+// Best-effort only: a hover-preview (or the bonus highlight-on-submit)
+// failing silently (sheet renamed/deleted, or the sheet edited since the
+// scan so the index no longer exists) must never surface as a user-facing
+// error or block the actual answer submission — this is a convenience on
+// top of the real flow, not part of it.
+async function mentorHighlightColumnMemoryCandidate(sheetName, candidate) {
+  if (!candidate) return;
+  try {
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getItemOrNullObject(sheetName);
+      sheet.load("isNullObject");
+      await context.sync();
+      if (sheet.isNullObject) return;
+
+      const usedRange = sheet.getUsedRangeOrNullObject();
+      usedRange.load("isNullObject");
+      await context.sync();
+      if (usedRange.isNullObject) return;
+
+      const columnRange = usedRange.getColumn(candidate.index);
+      sheet.activate();
+      columnRange.select();
+      await context.sync();
+    });
+  } catch (error) {
+    console.log("MENTOR column-memory: couldn't preview candidate column (sheet may have changed since the scan)", error.message);
+  }
+}
+
+const mentorDebouncedHighlightColumnMemoryCandidate = mentorColumnMemoryDebounce(mentorHighlightColumnMemoryCandidate, 150);
+
 // For each of the two workflow sheets, resolves every field fieldsInPlay()
 // flags — from memory where possible, otherwise collected as a pending
 // prompt. Returns resolved plain columns objects (same shape
@@ -182,7 +234,10 @@ function mentorRenderNextColumnMemoryPrompt() {
   html += "<div style='margin-bottom:8px;'>" + mentorColumnMemoryEscapeHtml(p.prompt) + "</div>";
   p.candidates.forEach((c, i) => {
     const preview = (c.sampleValues || []).slice(0, 5).map((v) => mentorColumnMemoryEscapeHtml(String(v))).join(", ");
-    html += "<div onclick='mentorSubmitColumnMemoryAnswer(" + i + ")' style='cursor:pointer;padding:6px;margin-bottom:4px;border:1px solid var(--line);border-radius:4px;background:var(--paper);'>";
+    const title = "Hover to see this column in '" + p.sheetName + "', click to choose it";
+    html +=
+      "<div onclick='mentorSubmitColumnMemoryAnswer(" + i + ")' onmouseenter='mentorHoverColumnMemoryCandidate(" + i + ")' title=\"" + mentorColumnMemoryEscapeHtml(title) + "\" " +
+      "style='cursor:pointer;padding:6px;margin-bottom:4px;border:1px solid var(--line);border-radius:4px;background:var(--paper);'>";
     html += "<strong class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink);\">" + mentorColumnMemoryEscapeHtml(c.header || "(blank header)") + "</strong><br/>";
     html += "<span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);font-size:11px;\">e.g. " + preview + "</span></div>";
   });
@@ -193,11 +248,31 @@ function mentorRenderNextColumnMemoryPrompt() {
   container.style.display = "block";
 }
 
+// Synchronous entry point (fired on onmouseenter) — captures sheetName and
+// the candidate object at THIS exact moment, before handing off to the
+// debounced highlighter. Explicit args (not re-reading module state after
+// the debounce delay) is what makes rapid mouse movement across several
+// candidates safe: whichever hover was last wins, and it always highlights
+// the column that was actually under the pointer, never a stale one from
+// after the prompt has since advanced.
+window.mentorHoverColumnMemoryCandidate = function (candidateIdx) {
+  const p = mentorPendingColumnMemoryPrompt;
+  if (!p) return;
+  const candidate = p.candidates[candidateIdx];
+  if (!candidate) return;
+  mentorDebouncedHighlightColumnMemoryCandidate(p.sheetName, candidate);
+};
+
 window.mentorSubmitColumnMemoryAnswer = async function (candidateIdx) {
   const p = mentorPendingColumnMemoryPrompt;
   if (!p) return;
   const chosen = p.candidates[candidateIdx];
   if (!chosen) return;
+
+  // Not awaited — this is a bonus confirmation of what was just chosen, not
+  // part of the actual save. Must never slow down or be able to block the
+  // real submit flow below.
+  mentorHighlightColumnMemoryCandidate(p.sheetName, chosen);
 
   try {
     console.log("MENTOR column-memory: submitting answer", { sheetName: p.sheetName, fieldName: p.fieldName, chosen });
