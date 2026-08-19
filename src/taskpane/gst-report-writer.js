@@ -81,6 +81,22 @@ function formatTaxHead(head) {
 // identifiers or references, not currency.
 const RUPEE_NUMBER_FORMAT = "#,##,##0.00";
 
+// Single source of truth for the Top-Issues Priority-1 gating rule — a
+// PERCENTAGE of total tax per 2A, not a fixed rupee figure, so it scales
+// with the size of the actual dataset instead of an arbitrary number baked
+// in for one company. 1% is a conservative, commonly-used starting point
+// for review materiality. Used by BOTH writeGstReconciliationReport's
+// fresh-generation path (materialityThreshold) and
+// readMaterialityThresholdFromSummary's read-back path (recomputes it from
+// the already-written "Total tax per 2A" cell when reopening a workbook
+// without regenerating) — previously each hardcoded its own separate
+// literal 0.01, which could silently drift apart if one were ever changed
+// without the other. RCM/Ineligible-ITC items below this threshold still
+// appear in Top Issues (Priority 3, reachable via "Show all") — they just
+// don't crowd out the headline top-5 the way a genuinely material item
+// should.
+const MATERIALITY_PERCENT = 0.01;
+
 // sheet: the worksheet already written to. startRow/rowCount: the DATA
 // range only (never the header row — a text header cell is unaffected by
 // number format either way, but scoping this precisely avoids any
@@ -1062,9 +1078,10 @@ const GST_SUMMARY_ROW_TRACEABILITY = {
   "  RCM rows (self-assessed by recipient, separate mechanism)": { sheet: "both", fields: ["reverseCharge", "particulars"] },
   "  Possible matches (no invoice-number match found, amount+GSTIN only — needs review)": { sheet: "both", fields: ["gstin", "taxableValue", "igst", "cgst", "sgst"] },
   "  Rate mismatch rows (taxable value x rate% vs actual tax, sanity-check backstop)": { sheet: "both", fields: ["rate", "taxableValue", "igst", "cgst", "sgst"] },
+  "Priority-1 threshold for RCM / Ineligible ITC (Top Issues ranking, sidebar)": { derivedFrom: ["Total tax per 2A"] },
 };
 
-async function writeSummarySheet(context, summary, sheetNames) {
+async function writeSummarySheet(context, summary, sheetNames, materialityThreshold) {
   const sheet = await getOrCreateCleanSheet(context, "GST - Summary");
 
   const rows = [
@@ -1104,12 +1121,23 @@ async function writeSummarySheet(context, summary, sheetNames) {
     ["  Possible matches (no invoice-number match found, amount+GSTIN only — needs review)", summary.informational.possibleMatchCount + " pair(s), ₹" + summary.informational.possibleMatchAmount + " total (see 'GST - Possible Matches')"],
     ["  Rate mismatch rows (taxable value x rate% vs actual tax, sanity-check backstop)", summary.informational.rateMismatchRowCount + " row(s), ₹" + summary.informational.rateMismatchAmount + " total (see 'GST - Rate Mismatch')"],
     ["", ""],
-    ["This is a PROPOSED reconciliation for review — nothing here has been filed, claimed, or reversed automatically. Every figure traces back to one of the sheets referenced above.", ""],
   ];
+
+  // Appended via push() rather than folded into the literal above so
+  // materialityThresholdRowIndex can be captured as rows.length right after
+  // pushing it — a self-computed index, safe regardless of how many rows
+  // precede it, rather than one more hardcoded row number added by hand to
+  // the pile below (see the "existing off-by-one" comment on those — this
+  // sheet has already broken once from a manually-counted row reference).
+  rows.push(["Priority-1 threshold for RCM / Ineligible ITC (Top Issues ranking, sidebar)", materialityThreshold]);
+  const materialityThresholdRowIndex = rows.length - 1;
+  rows.push(["  Rule: " + MATERIALITY_PERCENT * 100 + "% of 'Total tax per 2A' (above) — items below this still appear in Top Issues, just not in the default top 5", ""]);
+  rows.push(["", ""]);
+  rows.push(["This is a PROPOSED reconciliation for review — nothing here has been filed, claimed, or reversed automatically. Every figure traces back to one of the sheets referenced above.", ""]);
 
   const range = sheet.getRangeByIndexes(0, 0, rows.length, 2);
   range.values = rows;
-  // Only these 4 cells hold a genuine bare number in column B — every other
+  // Only these 5 cells hold a genuine bare number in column B — every other
   // "amount" line above is a pre-built display STRING (e.g. "-" + amount +
   // "  (...)"), and numberFormat has no effect on text cells, so they're
   // intentionally left alone rather than formatted here.
@@ -1117,6 +1145,7 @@ async function writeSummarySheet(context, summary, sheetNames) {
   applyRupeeNumberFormat(sheet, 14, 1, [1]); // Total tax per Books
   applyRupeeNumberFormat(sheet, 17, 1, [1]); // Provisionally supportable base
   applyRupeeNumberFormat(sheet, 22, 1, [1]); // NET PROVISIONALLY ELIGIBLE ITC
+  applyRupeeNumberFormat(sheet, materialityThresholdRowIndex, 1, [1]); // Priority-1 threshold
   sheet.getRange("A1").format.font.bold = true;
   sheet.getRange("A1").format.font.size = 13;
   sheet.getRange("A6").format.font.bold = true;
@@ -1150,14 +1179,10 @@ async function writeGstReconciliationReport(context, data) {
   const summary = buildGstSummary(data.comparisonSummary, stepTwoTotals, data.invoiceLevelExtrasResult);
 
   // Materiality threshold for Priority-1 RCM/Ineligible-ITC gating in the
-  // Top Issues ranking (see mentor-gst-reconciliation-ui.js's sidebar) — a
-  // PERCENTAGE of total tax per 2A, not a fixed rupee figure, so it scales
-  // with the size of the actual dataset instead of an arbitrary number
-  // baked in for one company. 1% is a conservative, commonly-used starting
-  // point for review materiality. RCM/Ineligible-ITC items below it still
-  // appear (Priority 3, reachable via "Show all") — they just don't crowd
-  // out the headline top-5 the way a genuinely material item should.
-  const MATERIALITY_PERCENT = 0.01;
+  // Top Issues ranking (see mentor-gst-reconciliation-ui.js's sidebar).
+  // MATERIALITY_PERCENT is defined once, near the top of this file, and
+  // shared with readMaterialityThresholdFromSummary's read-back path — see
+  // that constant's own comment for why.
   const materialityThreshold = roundTo2(summary.totalTaxPer2A * MATERIALITY_PERCENT);
 
   const results = [
@@ -1171,7 +1196,7 @@ async function writeGstReconciliationReport(context, data) {
     await writeDuplicateInvoicesSheet(context, data.dupBySource),
     await writeRateMismatchSheet(context, data.rateMismatchBySource || []),
   ];
-  await writeSummarySheet(context, summary, data.sheetNames); // no row-level identity — not part of review-note preservation or Top Issues
+  await writeSummarySheet(context, summary, data.sheetNames, materialityThreshold); // no row-level identity — not part of review-note preservation or Top Issues
   await context.sync();
 
   // Reviewer Status/Note preservation totals across every sheet that has
@@ -1536,7 +1561,7 @@ async function readMaterialityThresholdFromSummary(context) {
   if (!values) return 0;
   const totalRow = values.find((r) => String(r[0]).trim() === "Total tax per 2A");
   if (!totalRow) return 0;
-  return roundTo2(toNumber(totalRow[1]) * 0.01);
+  return roundTo2(toNumber(totalRow[1]) * MATERIALITY_PERCENT);
 }
 
 const GST_TOP_ISSUE_SHEET_SPECS = [
