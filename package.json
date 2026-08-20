@@ -25,6 +25,7 @@
     "test:classifier": "node src/sheet-classifier/regression-test.js",
     "test:sheet-memory": "node src/sheet-classifier/sheet-memory-test.js",
     "test:sheet-label-plausibility": "node src/sheet-classifier/sheet-label-plausibility-test.js",
+    "test:sheet-recognition-name-independence": "node src/sheet-classifier/sheet-recognition-name-independence-test.js",
     "test:gst-reconciliation": "node src/gst-reconciliation/gst-reconciliation-test.js",
     "test:gst-wrong-head": "node src/gst-reconciliation/wrong-head-detector-test.js",
     "test:gst-cross-sheet-wrong-head": "node src/gst-reconciliation/cross-sheet-wrong-head-detector-test.js",
