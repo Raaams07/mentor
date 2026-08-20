@@ -37,7 +37,7 @@ const { extractSheetSignals, extractWorkbookSignals } = require("./signal-extrac
 const { classifySheet, classifyWorkbook } = require("./classifier.js");
 const { JsonFileSheetMemoryStore } = require("./sheet-memory-store.js");
 const { resolveSheetLabel, rememberSheetLabel, updateStoredSheetLabel, forgetSheetLabel } = require("./sheet-memory.js");
-const { computeStructuralSignature, tagSequenceSimilarity, headerSequenceSimilarity } = require("./structural-signature.js");
+const { computeStructuralSignature, tagSequenceSimilarity, headerSequenceSimilarity, isStructuralSignatureShareable } = require("./structural-signature.js");
 
 const DEMO_FILE = path.join(__dirname, "..", "demo-data", "Three_Sisters_Kitchen_MENTOR_Demo.xlsx");
 
@@ -333,11 +333,52 @@ async function runReviewPanelEditAndReset() {
   console.log("");
 }
 
+// isStructuralSignatureShareable() gates promotion to the SHARED, cross-
+// client Tier-1 pattern store (sheet-label-pattern-store.js) — see its
+// docstring in structural-signature.js. Distinct from everything above:
+// those tests cover Tier 2 (per-client) resolution; this covers the "is
+// this shape distinctive enough to be a safe cross-client key" question
+// that gates promotion OUT of Tier 2 and INTO Tier 1.
+function runShareabilityGate() {
+  console.log("-- isStructuralSignatureShareable(): the Tier-1 promotion gate --\n");
+
+  const distinctive = extractSheetSignals("Inventory Snapshot", buildInventoryValues(20));
+  assert(
+    isStructuralSignatureShareable(distinctive) === true,
+    "a 5-column shape mixing unique text, categorical text, and numeric columns clears both the column-count and tag-diversity floors -- shareable"
+  );
+
+  const tooFewColumns = extractSheetSignals("Two Column Sheet", [
+    ["Name", "Amount"],
+    ["Alpha", 100],
+    ["Bravo", 200],
+    ["Charlie", 300],
+  ]);
+  assert(
+    isStructuralSignatureShareable(tooFewColumns) === false,
+    "only 2 columns -- too generic to be a safe cross-client key regardless of type diversity, blocked on the column-count floor"
+  );
+
+  const typeUniformHeader = ["Col A", "Col B", "Col C", "Col D"];
+  const typeUniformRows = [typeUniformHeader];
+  for (let i = 1; i <= 8; i++) {
+    typeUniformRows.push(["Alpha-" + i, "Bravo-" + i, "Charlie-" + i, "Delta-" + i]);
+  }
+  const typeUniform = extractSheetSignals("Four Uniform Text Columns", typeUniformRows);
+  assert(
+    isStructuralSignatureShareable(typeUniform) === false,
+    "4 columns, but all the same TEXT_UNIQUE shape -- clears the column-count floor but not the tag-diversity floor, blocked"
+  );
+
+  console.log("");
+}
+
 async function run() {
   await runSyntheticScenarios();
   await runRealDemoDataFlow();
   await runCrossTypeCollisionInvestigation();
   await runReviewPanelEditAndReset();
+  runShareabilityGate();
 
   if (findings.length > 0) {
     console.log(`\n${findings.length} note(s) from the cross-type collision investigation (see FINDING lines above).`);

@@ -32,15 +32,29 @@
  * reliably survive task pane close/reopen in this WebView2 hosting context
  * (Office appears to route task panes across multiple separate storage
  * profiles), so it can no longer be trusted as the primary source of truth.
+ * That whole store composition is TIER 2 (per-client).
+ *
+ * TIER 1 (shared software-pattern memory): checked only when Tier 2 doesn't
+ * resolve (see mentorScanForUnknownSheets) — a hit resolves the current
+ * scan silently and is never written back into Tier 2, so it's re-checked
+ * live every time rather than cached as if this client had confirmed it.
+ * Promotion INTO Tier 1 (see mentorPersistSheetMemoryAnswer) is gated on
+ * isStructuralSignatureShareable() (structural-signature.js) — a signature
+ * too short or too type-uniform to be a safe cross-client key stays in
+ * Tier 2 only, silently, with no extra prompt or friction for the user
+ * either way. See that function's docstring for the exact rationale and
+ * thresholds.
  */
 
 const { extractSheetSignals } = require("../sheet-classifier/signal-extractor.js");
 const { classifySheet } = require("../sheet-classifier/classifier.js");
 const { resolveSheetLabel, rememberSheetLabel } = require("../sheet-classifier/sheet-memory.js");
 const { checkLabelPlausibility } = require("../sheet-classifier/sheet-label-plausibility.js");
+const { isStructuralSignatureShareable } = require("../sheet-classifier/structural-signature.js");
 const { BrowserSheetMemoryStore } = require("../sheet-classifier/browser-sheet-memory-store.js");
 const { FallbackSheetMemoryStore } = require("../sheet-classifier/fallback-sheet-memory-store.js");
 const { WorkbookSheetMemoryStore, SHEET_NAME: MENTOR_SHEET_MEMORY_SHEET_NAME } = require("./mentor-workbook-sheet-memory-store.js");
+const { lookupSheetLabelPattern, rememberSheetLabelPattern } = require("./mentor-proxy-sheet-label-pattern-store.js");
 
 const mentorSheetMemoryStore = new FallbackSheetMemoryStore(new WorkbookSheetMemoryStore(), new BrowserSheetMemoryStore());
 let mentorSheetMemoryLogAction = null; // injected — updates the in-memory history counter/toggle text only
@@ -121,7 +135,21 @@ async function mentorScanForUnknownSheets() {
           console.log("MENTOR sheet-memory: '" + sheet.name + "' -> " + result.status + (result.status === "remembered" ? " (\"" + result.label + "\", via " + result.matchedVia + ")" : result.status === "classified" ? " (" + result.type + ")" : ""));
 
           if (result.status === "needs_input") {
-            candidates.push({ ...result, clientId, sheetSignals });
+            // Tier 2 (this client) has nothing on file — try Tier 1 (shared
+            // software-pattern memory) before queuing a prompt. Mirrors
+            // column-memory's own Tier-1 behavior exactly, including NOT
+            // writing the hit back into Tier 2: it resolves silently for
+            // THIS scan only, re-checked live next time rather than cached
+            // locally — Tier 2 stays reserved for an actual explicit answer
+            // from this specific client, never an inherited guess. See
+            // mentor-column-memory-ui.js's mentorResolveGstColumns for the
+            // identical rationale on the column side.
+            const tier1 = await lookupSheetLabelPattern(result.structuralSignature);
+            if (tier1.found) {
+              console.log("MENTOR sheet-memory: '" + sheet.name + "' resolved via Tier 1 (shared pattern) — \"" + tier1.label + "\", not prompting");
+            } else {
+              candidates.push({ ...result, clientId, sheetSignals });
+            }
           }
         } catch (sheetError) {
           console.error("MENTOR sheet-memory: failed to check sheet '" + sheet.name + "' — skipping it this scan", sheetError);
@@ -246,11 +274,27 @@ window.mentorEditSheetMemoryMismatch = function () {
 };
 
 async function mentorPersistSheetMemoryAnswer(value) {
-  const { clientId, sheetName, sheetSignals } = mentorPendingSheetMemoryPrompt;
+  const { clientId, sheetName, sheetSignals, structuralSignature } = mentorPendingSheetMemoryPrompt;
   try {
     console.log("MENTOR sheet-memory: submitting answer", { clientId, sheetName, value });
     const rememberResult = await rememberSheetLabel({ clientId, sheetName, sheetSignals, userProvidedLabel: value, store: mentorSheetMemoryStore });
     console.log("MENTOR sheet-memory: rememberSheetLabel returned", rememberResult);
+
+    // Promote to Tier 1 (shared software-pattern memory) too -- but only
+    // when the signature is distinctive enough to be a safe cross-client
+    // key (see isStructuralSignatureShareable's docstring in
+    // structural-signature.js). Unlike column-memory's "ambiguous reason"
+    // gate, there's no ready-made confidence signal on the sheet-identity
+    // side to reuse -- classifier.js's own scores measure closeness to a
+    // KNOWN type, not distinctiveness of an UNKNOWN shape, which is the
+    // actual risk here (a generic shape colliding across two different
+    // clients' genuinely different sheets). Fire-and-forget -- must never
+    // block or fail the Tier-2 save that already succeeded above.
+    if (isStructuralSignatureShareable(sheetSignals)) {
+      rememberSheetLabelPattern(structuralSignature, value);
+    } else {
+      console.log("MENTOR sheet-memory: '" + sheetName + "' signature too generic to share (Tier 1) -- kept in Tier 2 (this client) only");
+    }
 
     const description = "Learned that '" + sheetName + "' is \"" + value + "\" — won't ask again for a sheet with this shape";
     if (mentorSheetMemoryAppendAuditLogRow) {

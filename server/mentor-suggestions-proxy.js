@@ -31,12 +31,17 @@ const path = require("path");
 const { screenVendorsForIneligibleItc, callAnthropicApi } = require("./anthropic-vendor-itc-screening.js");
 const { mockScreenVendors } = require("./mock-vendor-itc-screening.js");
 const { ColumnPatternStore } = require("./column-pattern-store.js");
+const { SheetLabelPatternStore } = require("./sheet-label-pattern-store.js");
 const { normalizeCandidateHeaders } = require("../src/gst-reconciliation/column-pattern-key.js");
 const { normalizeHeaderText } = require("../src/sheet-classifier/structural-signature.js");
 
 // Tier 1 (shared software-pattern) column-resolution memory — see
 // column-pattern-store.js. Default path: server/data/column-pattern-memory.json.
 const columnPatternStore = new ColumnPatternStore();
+
+// Tier 1 (shared software-pattern) SHEET-IDENTITY memory — see
+// sheet-label-pattern-store.js. Default path: server/data/sheet-label-pattern-memory.json.
+const sheetLabelPatternStore = new SheetLabelPatternStore();
 
 const PORT = process.env.MENTOR_PROXY_PORT ? parseInt(process.env.MENTOR_PROXY_PORT, 10) : 3001;
 const FORCE_MOCK = process.env.MENTOR_MOCK_LLM === "1";
@@ -102,6 +107,18 @@ function validateColumnPatternRememberBody(body) {
   return null;
 }
 
+function validateSheetLabelPatternLookupBody(body) {
+  if (!body || typeof body.structuralSignature !== "string" || !body.structuralSignature.trim()) return "`structuralSignature` must be a non-empty string";
+  return null;
+}
+
+function validateSheetLabelPatternRememberBody(body) {
+  const baseError = validateSheetLabelPatternLookupBody(body);
+  if (baseError) return baseError;
+  if (typeof body.label !== "string" || !body.label.trim()) return "`label` must be a non-empty string";
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
 
@@ -147,6 +164,42 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       sendJson(res, 200, columnPatternStore.remember(parsedBody.fieldName, parsedBody.candidateHeaders, parsedBody.chosenHeader), origin);
+    } catch (error) {
+      sendJson(res, 400, { error: "request body is not valid JSON" }, origin);
+    }
+    return;
+  }
+
+  // Tier 1 (shared software-pattern) SHEET-IDENTITY memory — see
+  // sheet-label-pattern-store.js. Same "never client data" contract as the
+  // column-pattern routes above: the request body here only ever carries a
+  // structural signature (a coarse per-column shape fingerprint) and a
+  // label string — never a sheet name, GSTIN, or any other client-
+  // identifying content.
+  if (req.method === "POST" && req.url === "/api/sheet-label-pattern-memory/lookup") {
+    try {
+      const parsedBody = JSON.parse(await readRequestBody(req));
+      const validationError = validateSheetLabelPatternLookupBody(parsedBody);
+      if (validationError) {
+        sendJson(res, 400, { error: validationError }, origin);
+        return;
+      }
+      sendJson(res, 200, sheetLabelPatternStore.lookup(parsedBody.structuralSignature), origin);
+    } catch (error) {
+      sendJson(res, 400, { error: "request body is not valid JSON" }, origin);
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/sheet-label-pattern-memory/remember") {
+    try {
+      const parsedBody = JSON.parse(await readRequestBody(req));
+      const validationError = validateSheetLabelPatternRememberBody(parsedBody);
+      if (validationError) {
+        sendJson(res, 400, { error: validationError }, origin);
+        return;
+      }
+      sendJson(res, 200, sheetLabelPatternStore.remember(parsedBody.structuralSignature, parsedBody.label), origin);
     } catch (error) {
       sendJson(res, 400, { error: "request body is not valid JSON" }, origin);
     }

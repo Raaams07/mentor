@@ -44,6 +44,7 @@
     "test:gst-validation": "node src/gst-reconciliation/gst-validation-test.js",
     "test:gst-column-pattern-key": "node src/gst-reconciliation/column-pattern-key-test.js",
     "test:column-pattern-store": "node server/column-pattern-store-test.js",
+    "test:sheet-label-pattern-store": "node server/sheet-label-pattern-store-test.js",
     "test:gst-column-memory-client-isolation": "node src/gst-reconciliation/column-memory-client-isolation-test.js",
     "test:vendor-itc-screening": "node server/vendor-itc-screening-test.js",
     "test:ineligible-itc-vendor-extraction": "node src/taskpane/ineligible-itc-vendor-extraction-test.js",

@@ -69,6 +69,40 @@ function computeStructuralSignature(sheetSignals) {
   };
 }
 
+// Is this signature specific enough to safely promote to the SHARED,
+// cross-client Tier-1 pattern store (sheet-label-pattern-store.js)?
+//
+// The coarseness that makes a structural signature rename-proof (e.g.
+// "2:TEXT_UNIQUE,NUM_HIGH_SIGNED") also makes a SHORT or type-uniform one a
+// poor cross-client key: plenty of unrelated real-world sheet shapes could
+// legitimately produce the same few tags, so a label learned from one
+// client's sheet could silently misapply to a structurally-coincidental
+// but actually-different sheet from another client. This is a distinct
+// question from classifier.js's own confidence scoring, which measures how
+// closely a sheet matches one of the KNOWN types — it says nothing about
+// how distinctive an UNKNOWN shape is, and sheet-memory only ever reaches
+// the "needs_input"/promotion path for sheets the classifier already
+// declined to place into any known type.
+//
+// Two-part bar, deliberately mirroring classifier.js's own two-part
+// MIN_SCORE_TO_CLASSIFY + MIN_MARGIN_TO_CLASSIFY gate: an absolute floor
+// (enough columns to carry real shape information) plus a diversity floor
+// (not just N copies of the same column type, e.g. a single list of names
+// padded out to five columns isn't evidence of a distinctive software-
+// export shape). Both thresholds are deliberately conservative — false
+// negatives here just mean "ask this one client once more than strictly
+// necessary"; false positives mean a wrong label silently reaching every
+// other client, which is the more expensive mistake.
+const MIN_COLUMNS_FOR_SHARED_SHEET_PATTERN = 4;
+const MIN_DISTINCT_TAGS_FOR_SHARED_SHEET_PATTERN = 2;
+
+function isStructuralSignatureShareable(sheetSignals) {
+  const { tags, columnCount } = computeStructuralSignature(sheetSignals);
+  if (columnCount < MIN_COLUMNS_FOR_SHARED_SHEET_PATTERN) return false;
+  const distinctTags = new Set(tags.filter((t) => t !== "BLANK"));
+  return distinctTags.size >= MIN_DISTINCT_TAGS_FOR_SHARED_SHEET_PATTERN;
+}
+
 // Generic weighted edit distance: like classic Levenshtein, but the
 // substitution cost between two items is whatever costFn returns (0 = same,
 // 1 = completely different) instead of a hard equal/not-equal check. Both
@@ -139,6 +173,7 @@ function headerSequenceSimilarity(headerTokensA, headerTokensB) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     computeStructuralSignature,
+    isStructuralSignatureShareable,
     tagColumn,
     tagSequenceSimilarity,
     tokenLevenshteinDistance,
