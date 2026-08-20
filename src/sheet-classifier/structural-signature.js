@@ -179,5 +179,6 @@ if (typeof module !== "undefined" && module.exports) {
     tokenLevenshteinDistance,
     normalizeHeaderText,
     headerSequenceSimilarity,
+    singleHeaderSimilarity,
   };
 }

@@ -31,20 +31,33 @@
  * ui.js's own store composition. That whole store composition is TIER 2
  * (per-client, exactly what Part 1 built).
  *
+ * CROSS-SHEET SEARCH (Point 3 of the standing architecture request): checked
+ * after Tier 2 and before Tier 1, also scoped to genuinely ambiguous fields
+ * only. Before asking the user, checks whether ANOTHER sheet in THIS SAME
+ * workbook, already recognized as playing the SAME GST role, already has an
+ * unambiguous answer for the same field — this workbook's own data
+ * corroborating itself, which is why it's checked before the (cross-client,
+ * lower-trust) Tier 1 store. See gst-cross-sheet-column-search.js for the
+ * exact-match-only confidence bar and why a fuzzy near-match is only ever
+ * used to pre-fill/suggest a candidate in the prompt, never to resolve
+ * silently. Like a Tier-1 hit, never written back into Tier 2 — re-checked
+ * live every scan.
+ *
  * TIER 1 (shared software-pattern memory, Part 2): checked only when Tier 2
- * doesn't resolve, and only for genuinely ambiguous fields (2+ real
- * candidates) — not for zero-match-required fallback prompts, where the
- * offered "candidates" are just every column on the sheet, not a real
- * cross-client software-export pattern. Talks to the local proxy server
- * (mentor-proxy-column-pattern-store.js) — see that file for why every
- * call there must never throw or block. A Tier-1 hit is never written back
- * into Tier 2 (no promotion) — it's re-checked live on every scan; Tier 2,
- * once populated by an explicit user answer, is always checked first and
- * always wins for that client's own future scans.
+ * and cross-sheet search don't resolve, and only for genuinely ambiguous
+ * fields (2+ real candidates) — not for zero-match-required fallback
+ * prompts, where the offered "candidates" are just every column on the
+ * sheet, not a real cross-client software-export pattern. Talks to the
+ * local proxy server (mentor-proxy-column-pattern-store.js) — see that file
+ * for why every call there must never throw or block. A Tier-1 hit is never
+ * written back into Tier 2 (no promotion) — it's re-checked live on every
+ * scan; Tier 2, once populated by an explicit user answer, is always
+ * checked first and always wins for that client's own future scans.
  */
 
 const { resolveColumnField, rememberColumnField } = require("../gst-reconciliation/column-memory.js");
 const { fieldsInPlay } = require("../gst-reconciliation/gst-column-ambiguity-rules.js");
+const { findCrossSheetColumnMatch } = require("../gst-reconciliation/gst-cross-sheet-column-search.js");
 const { normalizeHeaderText } = require("../sheet-classifier/structural-signature.js");
 const { BrowserSheetMemoryStore } = require("../sheet-classifier/browser-sheet-memory-store.js");
 const { FallbackSheetMemoryStore } = require("../sheet-classifier/fallback-sheet-memory-store.js");
@@ -127,7 +140,13 @@ const mentorDebouncedHighlightColumnMemoryCandidate = mentorColumnMemoryDebounce
 // identifyGstColumns() already produces) ready to shallow-merge over the
 // existing role-recognition columns, plus the list of anything still
 // unresolved (non-empty => the caller must block).
-async function mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet }) {
+//
+// roleResults: gst-role-recognizer.js's per-sheet results for EVERY sheet
+// in the workbook (gst-reconciliation.js's recognizeGstSheets() output) —
+// used only for the cross-sheet search step (see this file's docstring),
+// to find other sheets sharing gstr2aSheet/booksSheet's own role. Optional:
+// omitted (or {}) simply skips that step, same as if it found nothing.
+async function mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet, roleResults }) {
   const perSheet = [
     { key: "gstr2a", sheet: gstr2aSheet, role: "gstr2a" },
     { key: "books", sheet: booksSheet, role: "purchase_register" },
@@ -139,6 +158,14 @@ async function mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet }) {
     const sheetSignals = sheet.result.sheetSignals;
     const inPlay = fieldsInPlay(role, sheet.result.columns.candidates);
     const allColumnIndices = sheetSignals.columns.map((c) => c.index);
+
+    // Every OTHER sheet in the workbook already recognized as playing this
+    // SAME role — the candidate pool for cross-sheet search below. Computed
+    // once per sheet (not per field), since it doesn't depend on which
+    // field is being resolved.
+    const sameRoleOtherSheets = Object.entries(roleResults || {})
+      .filter(([otherSheetName, r]) => otherSheetName !== sheet.sheetName && r && r.role === role)
+      .map(([otherSheetName, r]) => ({ sheetName: otherSheetName, columns: r.columns, sheetSignals: r.sheetSignals }));
 
     for (const item of inPlay) {
       const resolved = await resolveColumnField({
@@ -156,19 +183,38 @@ async function mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet }) {
         continue;
       }
 
-      // Tier 2 didn't resolve -- try Tier 1 (shared software-pattern
-      // memory) before queuing a prompt, but only for genuine ambiguity
-      // (see this file's docstring for why zero_match_* reasons are
-      // excluded). Scoped identically on the remember side below.
-      let tier1Resolved = false;
+      // Tier 2 didn't resolve -- try cross-sheet search (this workbook's
+      // own other same-role sheets) before Tier 1 (cross-client), and only
+      // for genuine ambiguity (see this file's docstring for why
+      // zero_match_* reasons are excluded from both).
+      let resolvedThisField = false;
+      let suggestion = null;
       if (item.reason === "ambiguous") {
+        const crossSheet = findCrossSheetColumnMatch(item.field, resolved.candidates, sameRoleOtherSheets);
+        if (crossSheet.matchType === "exact") {
+          const match = sheetSignals.columns.find((c) => normalizeHeaderText(c.header) === normalizeHeaderText(crossSheet.matchedHeader));
+          if (match) {
+            resolvedColumns[key][item.field] = match.index;
+            resolvedThisField = true;
+          }
+        } else if (crossSheet.matchType === "fuzzy") {
+          // Not silent -- carried into the pending prompt below so the UI
+          // can pre-fill/highlight it instead of leaving the reviewer to
+          // pick blind.
+          suggestion = crossSheet;
+        }
+      }
+
+      // Tier 1 (shared software-pattern memory) -- only tried if
+      // cross-sheet search didn't already resolve it.
+      if (!resolvedThisField && item.reason === "ambiguous") {
         const candidateHeaders = resolved.candidates.map((c) => c.header);
         const tier1 = await lookupColumnPattern(item.field, candidateHeaders);
         if (tier1.found) {
           const match = sheetSignals.columns.find((c) => normalizeHeaderText(c.header) === tier1.chosenHeader);
           if (match) {
             resolvedColumns[key][item.field] = match.index;
-            tier1Resolved = true;
+            resolvedThisField = true;
           }
           // else: no column on THIS sheet currently has the remembered
           // header (shape drifted) -- fall through to needs_input below,
@@ -176,8 +222,8 @@ async function mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet }) {
         }
       }
 
-      if (!tier1Resolved) {
-        pendingPrompts.push({ sheetKey: key, clientId, sheetSignals, reason: item.reason, ...resolved });
+      if (!resolvedThisField) {
+        pendingPrompts.push({ sheetKey: key, clientId, sheetSignals, reason: item.reason, suggestion, ...resolved });
       }
     }
   }
@@ -230,14 +276,30 @@ function mentorRenderNextColumnMemoryPrompt() {
   const p = mentorPendingColumnMemoryPrompt;
   const accent = "var(--red)"; // distinct red — this is a BLOCKING prompt (no proposal card until resolved), not an FYI
 
+  // Cross-sheet search's fuzzy outcome (see mentor-column-memory-ui.js's
+  // docstring / gst-cross-sheet-column-search.js) — never resolves the
+  // field silently, but pre-fills this prompt with a suggested pick instead
+  // of leaving the reviewer to choose blind. Matched by normalized header
+  // text since p.suggestion carries the candidate's header string, not its
+  // index (built before this exact prompt object existed).
+  const suggestedIndex = p.suggestion ? p.candidates.findIndex((c) => normalizeHeaderText(c.header) === normalizeHeaderText(p.suggestion.matchedHeader)) : -1;
+
   let html = "<div style=\"font-family:'Inter','Segoe UI',sans-serif;background:#FFFFFF;border:1px solid var(--line);border-left:4px solid " + accent + ";padding:10px;border-radius:6px;font-size:12px;color:var(--ink);\">";
   html += "<div style='margin-bottom:8px;'>" + mentorColumnMemoryEscapeHtml(p.prompt) + "</div>";
   p.candidates.forEach((c, i) => {
     const preview = (c.sampleValues || []).slice(0, 5).map((v) => mentorColumnMemoryEscapeHtml(String(v))).join(", ");
-    const title = "Hover to see this column in '" + p.sheetName + "', click to choose it";
+    const isSuggested = i === suggestedIndex;
+    const title = isSuggested
+      ? "Suggested — matches '" + p.suggestion.sourceSheetName + "'. Hover to see this column, click to choose it."
+      : "Hover to see this column in '" + p.sheetName + "', click to choose it";
+    const border = isSuggested ? "1px solid var(--green)" : "1px solid var(--line)";
+    const background = isSuggested ? "var(--green-bg)" : "var(--paper)";
     html +=
       "<div onclick='mentorSubmitColumnMemoryAnswer(" + i + ")' onmouseenter='mentorHoverColumnMemoryCandidate(" + i + ")' title=\"" + mentorColumnMemoryEscapeHtml(title) + "\" " +
-      "style='cursor:pointer;padding:6px;margin-bottom:4px;border:1px solid var(--line);border-radius:4px;background:var(--paper);'>";
+      "style='cursor:pointer;padding:6px;margin-bottom:4px;border:" + border + ";border-radius:4px;background:" + background + ";'>";
+    if (isSuggested) {
+      html += "<div style=\"font-family:'Space Grotesk','Segoe UI',sans-serif;font-weight:500;font-size:10px;letter-spacing:0.03em;text-transform:uppercase;color:var(--green);margin-bottom:2px;\">Suggested — matches '" + mentorColumnMemoryEscapeHtml(p.suggestion.sourceSheetName) + "'</div>";
+    }
     html += "<strong class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink);\">" + mentorColumnMemoryEscapeHtml(c.header || "(blank header)") + "</strong><br/>";
     html += "<span class='mentor-mono' style=\"font-family:'JetBrains Mono','Consolas',monospace;color:var(--ink-soft);font-size:11px;\">e.g. " + preview + "</span></div>";
   });
@@ -246,6 +308,14 @@ function mentorRenderNextColumnMemoryPrompt() {
 
   container.innerHTML = html;
   container.style.display = "block";
+
+  // Pre-fill in the Excel view too, not just visually in the prompt —
+  // mirrors what a hover already does, so the reviewer sees the suggested
+  // column highlighted without having to move the mouse first. Best-effort,
+  // not awaited: mentorHighlightColumnMemoryCandidate already fails silently.
+  if (suggestedIndex !== -1) {
+    mentorHighlightColumnMemoryCandidate(p.sheetName, p.candidates[suggestedIndex]);
+  }
 }
 
 // Synchronous entry point (fired on onmouseenter) — captures sheetName and

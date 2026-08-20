@@ -231,7 +231,7 @@ async function mentorScanForGstReconciliation() {
       // sheets is resolved — this is what stops a repeat of the Tally CGST
       // bug from ever reaching a proposal silently.
       const clientId = mentorGetColumnMemoryClientId(context.workbook.name);
-      const resolution = await mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet });
+      const resolution = await mentorResolveGstColumns({ clientId, gstr2aSheet, booksSheet, roleResults });
 
       if (resolution.blocked) {
         mentorHideGstProposalCard();
