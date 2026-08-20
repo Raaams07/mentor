@@ -81,6 +81,16 @@ module.exports = async (env, options) => {
               }
             },
           },
+          // Marketing landing page — fully self-contained (inline CSS/JS, no
+          // relative asset paths, absolute Formspree/Google Fonts URLs only),
+          // so a plain copy is all it needs. Served as "index.html" so it
+          // shows at the bare domain root — the add-in itself lives at its
+          // own separate paths (taskpane.html, commands.html), so this never
+          // conflicts with or affects the sideloaded add-in in any way.
+          {
+            from: "src/mentor_landing.html/mentor_landing.html",
+            to: "index.html",
+          },
         ],
       }),
       new HtmlWebpackPlugin({
