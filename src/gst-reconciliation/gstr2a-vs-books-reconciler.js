@@ -8,7 +8,8 @@
  * checking individual invoices — then compares the two aggregates per
  * GSTIN within a small rounding tolerance, and builds a PROPOSED summary.
  * Nothing here writes to the workbook or applies anything automatically;
- * MENTOR's existing "propose, don't auto-execute" rule applies here too.
+ * MENTOR's existing "propose, don't auto-execute" rule (see
+ * docs/ARCHITECTURE-PRINCIPLES.md) applies here too.
  *
  * This file is intentionally workflow-specific (not a generic "compare any
  * two GST sheets" function) — a future GSTR-1 vs GSTR-3B workflow compares

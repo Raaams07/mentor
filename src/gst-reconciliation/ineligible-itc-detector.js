@@ -21,8 +21,9 @@
  * data usually doesn't carry — e.g. whether a motor vehicle purchase was
  * for further supply, an excepted business use). Every match is returned
  * with the matched keyword and category so a human reviews the actual
- * claim, consistent with MENTOR's "propose, don't auto-execute" rule —
- * this never removes or reclassifies a credit on its own.
+ * claim, consistent with MENTOR's "propose, don't auto-execute" rule (see
+ * docs/ARCHITECTURE-PRINCIPLES.md) — this never removes or reclassifies a
+ * credit on its own.
  */
 
 const { ITC_INELIGIBLE_CATEGORIES } = require("./ineligible-itc-config.js");

@@ -8,9 +8,9 @@
  * vendor match/mismatch; Step 2: Wrong Head / RCM / Ineligible ITC /
  * Duplicate Invoices) to the actual add-in: detects GST-shaped sheets,
  * computes the full reconciliation read-only, and — following MENTOR's
- * "propose, don't auto-execute" rule — shows a summary card and only
- * writes the output sheets (via gst-report-writer.js) once the user
- * explicitly accepts.
+ * "propose, don't auto-execute" rule (see docs/ARCHITECTURE-PRINCIPLES.md)
+ * — shows a summary card and only writes the output sheets (via
+ * gst-report-writer.js) once the user explicitly accepts.
  *
  * Nothing in src/gst-reconciliation/ is modified or reimplemented here —
  * this file only calls those pure functions and drives the UI/Excel-write

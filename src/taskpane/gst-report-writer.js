@@ -15,9 +15,10 @@ const { isConfirmedDuplicateMatch } = require("../gst-reconciliation/duplicate-i
  *
  * This file does NOT recompute or alter any reconciliation logic — it only
  * reads the pure functions' return values and formats them onto sheets.
- * Consistent with MENTOR's "propose, don't auto-execute" rule: nothing
- * here runs until the user has already seen a proposal and clicked accept
- * (see mentor-gst-reconciliation-ui.js) — this module is the "write it for
+ * Consistent with MENTOR's "propose, don't auto-execute" rule (see
+ * docs/ARCHITECTURE-PRINCIPLES.md): nothing here runs until the user has
+ * already seen a proposal and clicked accept (see
+ * mentor-gst-reconciliation-ui.js) — this module is the "write it for
  * real" step, not the decision to do so.
  */
 

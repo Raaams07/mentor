@@ -53,8 +53,9 @@
  *   to invoice-level truth.
  *
  * Every figure here is explicitly the PROPOSED reconciliation for human
- * review — MENTOR's "propose, don't auto-execute" rule applies to this
- * synthesis exactly as it does to Step 1 and Step 2 individually.
+ * review — MENTOR's "propose, don't auto-execute" rule (see
+ * docs/ARCHITECTURE-PRINCIPLES.md) applies to this synthesis exactly as it
+ * does to Step 1 and Step 2 individually.
  */
 
 function roundTo2(n) {
