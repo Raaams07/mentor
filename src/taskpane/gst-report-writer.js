@@ -445,7 +445,7 @@ async function writeExtraInBooksSheet(context, invoiceLevelExtrasResult, sheetNa
     "Invoice-level check: invoices present in '" + sheetNames.books + "' with no matching GSTIN + Invoice/Voucher Number in '" + sheetNames.gstr2a + "'.",
     "This means the supplier hasn't (yet) reported this specific invoice in their GSTR-1, or filed it under a different/incorrect GSTIN or invoice number.",
     "Matched at the INVOICE level, not by vendor alone — a vendor with some invoices matching '" + sheetNames.gstr2a + "' can still have other invoices genuinely missing; those still appear here even when the vendor overall isn't flagged as missing.",
-    "Since ITC eligibility requires the credit to be reflected in the supplier's return (CGST Act Section 16(2)(aa) / Rule 36(4)), these amounts are NOT counted as currently supportable in the Summary sheet until the supplier's filing is confirmed.",
+    "Since ITC eligibility requires the credit to be reflected in GSTR-2B, not just GSTR-2A (CGST Act Section 16(2)(aa) / Rule 36(4)), these amounts are NOT counted as currently supportable in the Summary sheet until the supplier's filing is confirmed.",
     "Not auto-applied — review each row and follow up with the supplier before claiming.",
   ];
 
@@ -1264,7 +1264,7 @@ function explainExtraInvoiceRow(row, kind) {
     return {
       ruleLabel: "Extra in Books",
       whichRuleFired: "Invoice " + identifier + " (GSTIN " + gstin + ") appears in Books but not in 2A — the supplier may not have filed this invoice yet, or filed it under a different GSTIN/invoice number.",
-      legalCitation: "ITC eligibility requires the credit to be reflected in the supplier's GSTR-1/2A (CGST Act Section 16(2)(aa) / Rule 36(4)).",
+      legalCitation: "ITC eligibility requires the credit to be reflected in GSTR-2B — not GSTR-2A — per CGST Act Section 16(2)(aa) / Rule 36(4). 2A is a live tracking view; 2B is the auto-generated monthly statement that actually gates what can currently be claimed.",
     };
   }
   return {
