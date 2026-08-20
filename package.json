@@ -41,6 +41,7 @@
     "test:gst-column-memory": "node src/gst-reconciliation/column-memory-test.js",
     "test:gst-column-resolution-integration": "node src/gst-reconciliation/gst-column-resolution-integration-test.js",
     "test:gst-rate-mismatch": "node src/gst-reconciliation/rate-mismatch-detector-test.js",
+    "test:gst-validation": "node src/gst-reconciliation/gst-validation-test.js",
     "test:gst-column-pattern-key": "node src/gst-reconciliation/column-pattern-key-test.js",
     "test:column-pattern-store": "node server/column-pattern-store-test.js",
     "test:gst-column-memory-client-isolation": "node src/gst-reconciliation/column-memory-client-isolation-test.js",

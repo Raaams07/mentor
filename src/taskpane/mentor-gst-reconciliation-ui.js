@@ -35,7 +35,7 @@ const { detectInvoiceLevelExtras } = require("../gst-reconciliation/extra-invoic
 const { detectRcmForSheet } = require("../gst-reconciliation/rcm-detector.js");
 const { detectIneligibleItcForSheet } = require("../gst-reconciliation/ineligible-itc-detector.js");
 const { findDuplicateInvoices } = require("../gst-reconciliation/duplicate-invoice-detector.js");
-const { detectRateMismatch } = require("../gst-reconciliation/rate-mismatch-detector.js");
+const { runStandingValidators } = require("../gst-reconciliation/gst-validation.js");
 const { writeGstReconciliationReport, GST_REPORT_SHEET_NAMES, GST_EXPLAIN_SHEET_NAMES, explainGstRow, appendIneligibleItcVendorSuggestions, readGstTopIssuesFromExistingSheets } = require("./gst-report-writer.js");
 const { extractDistinctVendors } = require("./ineligible-itc-vendor-extraction.js");
 const { MENTOR_OWNED_SHEET_NAMES } = require("./mentor-sheet-memory-ui.js");
@@ -322,15 +322,18 @@ function mentorComputeGstReconciliation(gstr2aSheet, booksSheet) {
     { sheetName: booksSheet.sheetName, role: "purchase_register", ...booksInput, result: findDuplicateInvoices(booksInput.values, booksInput.headerRowIndex, booksInput.columns) },
   ];
 
-  // Pattern-agnostic sanity-check backstop (rate-mismatch-detector.js) —
-  // informational only, same treatment as Wrong Head: never blocks, never
-  // changes the net eligible ITC figure. Silently not-applicable on a
-  // sheet with no resolved Rate column (rate is optional, never asked
-  // about — see gst-column-ambiguity-rules.js).
-  const rateMismatchBySource = [
-    { sheetName: gstr2aSheet.sheetName, role: "gstr2a", ...gstr2aInput, result: detectRateMismatch(gstr2aInput.values, gstr2aInput.headerRowIndex, gstr2aInput.columns) },
-    { sheetName: booksSheet.sheetName, role: "purchase_register", ...booksInput, result: detectRateMismatch(booksInput.values, booksInput.headerRowIndex, booksInput.columns) },
-  ];
+  // Standing validation pass (gst-validation.js) — the arithmetic sanity-
+  // check backstop, informational only, same treatment as Wrong Head:
+  // never blocks, never changes the net eligible ITC figure. Silently
+  // not-applicable on a sheet with no resolved Rate column (rate is
+  // optional, never asked about — see gst-column-ambiguity-rules.js).
+  // Routed through the shared module (not called directly here) so the
+  // GSTR-1-vs-3B / 3B-vs-Books workflows call the exact same standing
+  // checks from day one instead of duplicating this call site.
+  const { rateMismatch: rateMismatchBySource } = runStandingValidators([
+    { sheetName: gstr2aSheet.sheetName, role: "gstr2a", ...gstr2aInput },
+    { sheetName: booksSheet.sheetName, role: "purchase_register", ...booksInput },
+  ]);
 
   // Cross-sheet Wrong Head findings count toward the SAME "Wrong Head"
   // category, not a separate one — it's a complementary check for the
