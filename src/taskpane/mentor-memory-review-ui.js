@@ -61,6 +61,10 @@ function mentorMemoryReviewEscapeHtml(text) {
 // memory-ui.js / mentor-gst-reconciliation-ui.js — duplicated locally
 // rather than imported, matching this codebase's existing convention of
 // small trivial helpers living per-file instead of a shared util for one line.
+//
+// A future permission layer belongs HERE, not inside the store classes this
+// file reads from directly: see mentorGetSheetMemoryClientId()'s equivalent
+// note and docs/permissions-and-memory.md.
 function mentorGetMemoryReviewClientId(workbookName) {
   return "workbook:" + workbookName;
 }

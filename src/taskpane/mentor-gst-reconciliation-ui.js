@@ -65,6 +65,10 @@ MENTOR_OWNED_SHEET_NAMES.add(COLUMN_MEMORY_SHEET_NAME);
 // that function isn't exported and column-memory's clientId scoping is
 // conceptually independent of sheet-memory's, even though the value is
 // currently identical.
+//
+// A future permission layer belongs HERE, not inside column-memory.js: see
+// mentorGetSheetMemoryClientId()'s equivalent note and
+// docs/permissions-and-memory.md.
 function mentorGetColumnMemoryClientId(workbookName) {
   return "workbook:" + workbookName;
 }

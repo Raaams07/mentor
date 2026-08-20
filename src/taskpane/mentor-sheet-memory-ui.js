@@ -69,6 +69,12 @@ const MENTOR_OWNED_SHEET_NAMES = new Set(["MENTOR Audit Log", MENTOR_SHEET_MEMOR
 // Placeholder client identifier, scoped to this workbook file — a real
 // account/client system will replace this. Until then, one workbook file
 // is treated as one "client" for sheet-memory scoping purposes.
+//
+// A future permission layer belongs HERE, not inside sheet-memory.js: this
+// is where actor identity would need to enter (clientId becoming a
+// workbook x actor compound key), with a permission gate added right after
+// the call to this function, before resolveSheetLabel/rememberSheetLabel
+// run. See docs/permissions-and-memory.md.
 function mentorGetSheetMemoryClientId(workbookName) {
   return "workbook:" + workbookName;
 }
